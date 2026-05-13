@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import { useAuth } from './AuthContext';
-import { ArrowLeft, ArrowUp, ArrowDown, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeft, ArrowUp, ArrowDown, Plus, Trash2, Edit2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 export default function Areas() {
@@ -52,6 +52,14 @@ export default function Areas() {
   const handleDeleteArea = async (id) => {
     await supabase.from('areas').delete().eq('id', id);
     setAreas(areas.filter(a => a.id !== id));
+  };
+
+  const handleEditArea = async (area) => {
+    const newName = window.prompt('Novo nome do corredor:', area.name);
+    if (newName !== null && newName.trim() !== '' && newName.trim() !== area.name) {
+      await supabase.from('areas').update({ name: newName.trim() }).eq('id', area.id);
+      setAreas(areas.map(a => a.id === area.id ? { ...a, name: newName.trim() } : a));
+    }
   };
 
   const moveArea = async (index, direction) => {
@@ -122,9 +130,14 @@ export default function Areas() {
               <span style={{ fontWeight: 600, fontSize: '1.05rem' }}>{area.name}</span>
             </div>
             
-            <button onClick={() => handleDeleteArea(area.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '8px' }}>
-              <Trash2 color="var(--danger)" size={20} />
-            </button>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button onClick={() => handleEditArea(area)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '8px' }}>
+                <Edit2 color="var(--primary)" size={20} />
+              </button>
+              <button onClick={() => handleDeleteArea(area.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '8px' }}>
+                <Trash2 color="var(--danger)" size={20} />
+              </button>
+            </div>
           </div>
         ))}
       </div>

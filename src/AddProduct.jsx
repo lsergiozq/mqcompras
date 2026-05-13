@@ -2,12 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import { useAuth } from './AuthContext';
 import { ArrowLeft, Camera } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { compressImage } from './imageUtils';
 
 export default function AddProduct() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const editingProduct = location.state?.product || null;
+
   const [areas, setAreas] = useState([]);
   const [name, setName] = useState('');
   const [selectedArea, setSelectedArea] = useState('');
@@ -20,11 +23,20 @@ export default function AddProduct() {
     loadAreas();
   }, [user]);
 
+  useEffect(() => {
+    if (editingProduct && areas.length > 0) {
+      setName(editingProduct.name);
+      setSelectedArea(editingProduct.area_id);
+      if (editingProduct.thumbnail_url) {
+        setImagePreview(editingProduct.thumbnail_url);
+      }
+    }
+  }, [editingProduct, areas]);
+
   const loadAreas = async () => {
     let { data: userFamilies } = await supabase.from('user_families').select('family_id').eq('user_id', user.id);
     
     let fid = null;
-    // Se por acaso o usuário não tiver família ainda, cria uma padrão
     if (!userFamilies || userFamilies.length === 0) {
       const { data: newFamily } = await supabase.from('families').insert([{ name: 'Minha Família' }]).select().single();
       fid = newFamily.id;
@@ -41,7 +53,7 @@ export default function AddProduct() {
 
     const { data } = await supabase.from('areas').select('*').eq('family_id', fid).order('order_index');
     setAreas(data || []);
-    if (data && data.length > 0) setSelectedArea(data[0].id);
+    if (data && data.length > 0 && !editingProduct) setSelectedArea(data[0].id);
   };
 
   const handleImageChange = async (e) => {
@@ -62,7 +74,7 @@ export default function AddProduct() {
     setLoading(true);
 
     try {
-      let thumbnailUrl = null;
+      let thumbnailUrl = editingProduct?.thumbnail_url || null;
 
       if (imageFile) {
         const fileName = `${familyId}/${Date.now()}-${Math.random().toString(36).substring(7)}.jpg`;
@@ -73,20 +85,31 @@ export default function AddProduct() {
         }
       }
 
-      // Pega o número de itens na área para colocar no fim da fila
-      const { count } = await supabase.from('products').select('*', { count: 'exact', head: true }).eq('area_id', selectedArea);
-      const newIndex = (count || 0) * 10;
+      if (editingProduct) {
+        // Atualiza
+        const { error: productError } = await supabase.from('products').update({
+          area_id: selectedArea,
+          name,
+          thumbnail_url: thumbnailUrl
+        }).eq('id', editingProduct.id);
+        
+        if (productError) throw productError;
+      } else {
+        // Pega o número de itens na área para colocar no fim da fila
+        const { count } = await supabase.from('products').select('*', { count: 'exact', head: true }).eq('area_id', selectedArea);
+        const newIndex = (count || 0) * 10;
 
-      // Salva no catálogo
-      const { data: product, error: productError } = await supabase.from('products').insert([{
-        family_id: familyId,
-        area_id: selectedArea,
-        name,
-        thumbnail_url: thumbnailUrl,
-        order_index: newIndex
-      }]).select().single();
+        // Insere
+        const { error: productError } = await supabase.from('products').insert([{
+          family_id: familyId,
+          area_id: selectedArea,
+          name,
+          thumbnail_url: thumbnailUrl,
+          order_index: newIndex
+        }]);
 
-      if (productError) throw productError;
+        if (productError) throw productError;
+      }
 
       navigate('/catalog');
     } catch (err) {
@@ -100,7 +123,7 @@ export default function AddProduct() {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: '24px', gap: '12px' }}>
         <Link to="/catalog" style={{ color: 'var(--text-main)' }}><ArrowLeft /></Link>
-        <h2 style={{ fontSize: '1.25rem' }}>Novo Produto</h2>
+        <h2 style={{ fontSize: '1.25rem' }}>{editingProduct ? 'Editar Produto' : 'Novo Produto'}</h2>
       </div>
 
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -132,7 +155,9 @@ export default function AddProduct() {
         <div className="card" style={{ marginBottom: 0 }}>
           <label style={{ display: 'block', marginBottom: '8px', fontWeight: 500 }}>Foto (opcional)</label>
           <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '12px' }}>
-            Tire uma foto para facilitar na hora de achar no mercado. A imagem será comprimida automaticamente.
+            {editingProduct && editingProduct.thumbnail_url 
+              ? 'Tire uma nova foto se quiser substituir a atual.'
+              : 'Tire uma foto para facilitar na hora de achar no mercado.'}
           </p>
           
           <label style={{

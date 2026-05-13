@@ -221,9 +221,13 @@ export default function ShoppingList() {
                           style={{ fontSize: '0.875rem', color: 'var(--primary)', cursor: 'pointer', display: 'inline-block', padding: '2px 6px', backgroundColor: 'var(--background)', borderRadius: '4px', marginTop: '4px', fontWeight: 500 }}
                           onClick={(e) => {
                             e.stopPropagation();
-                            const newQty = window.prompt('Nova quantidade:', item.quantity);
+                            const newQty = window.prompt('Nova quantidade (Digite 0 para remover):', item.quantity);
                             if (newQty !== null && newQty.trim() !== '') {
-                              supabase.from('list_items').update({ quantity: newQty.trim() }).eq('id', item.id).then(() => fetchItems(familyId));
+                              if (newQty.trim() === '0') {
+                                supabase.from('list_items').delete().eq('id', item.id).then(() => fetchItems(familyId));
+                              } else {
+                                supabase.from('list_items').update({ quantity: newQty.trim() }).eq('id', item.id).then(() => fetchItems(familyId));
+                              }
                             }
                           }}
                         >

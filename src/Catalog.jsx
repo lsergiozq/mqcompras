@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import { useAuth } from './AuthContext';
-import { Link } from 'react-router-dom';
-import { Plus, Search, Image as ImageIcon, ArrowUp, ArrowDown } from 'lucide-react';
+import { Plus, Search, Image as ImageIcon, ArrowUp, ArrowDown, Edit2, Trash2 } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
 
 export default function Catalog() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [products, setProducts] = useState([]);
   const [familyId, setFamilyId] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -68,6 +69,32 @@ export default function Catalog() {
       }]);
     }
     alert('Adicionado à lista de compras!');
+  };
+
+  const handleEditProduct = (product) => {
+    navigate('/add', { state: { product } });
+  };
+
+  const handleDeleteProduct = async (product) => {
+    if (window.confirm(`Tem certeza que deseja apagar "${product.name}" do catálogo e de todas as listas?`)) {
+      // 1. Remove from shopping list first to avoid FK constraint errors
+      await supabase.from('list_items').delete().eq('product_id', product.id);
+      
+      // 2. Remove image from storage if exists
+      if (product.thumbnail_url) {
+        try {
+          const urlParts = product.thumbnail_url.split('/');
+          const fileName = urlParts.pop();
+          const folderName = urlParts.pop();
+          await supabase.storage.from('thumbnails').remove([`${folderName}/${fileName}`]);
+        } catch(e) {}
+      }
+
+      // 3. Remove product
+      await supabase.from('products').delete().eq('id', product.id);
+      
+      setProducts(products.filter(p => p.id !== product.id));
+    }
   };
 
   const moveProduct = async (areaName, index, direction) => {
@@ -169,6 +196,17 @@ export default function Catalog() {
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 500 }}>{p.name}</div>
                     </div>
+                    
+                    {!searchQuery && (
+                      <div style={{ display: 'flex', gap: '4px' }}>
+                        <button onClick={() => handleEditProduct(p)} className="btn" style={{ padding: '8px', backgroundColor: 'transparent', color: 'var(--primary)' }}>
+                          <Edit2 size={18} />
+                        </button>
+                        <button onClick={() => handleDeleteProduct(p)} className="btn" style={{ padding: '8px', backgroundColor: 'transparent', color: 'var(--danger)' }}>
+                          <Trash2 size={18} />
+                        </button>
+                      </div>
+                    )}
                     
                     <button onClick={() => addToShoppingList(p.id)} className="btn" style={{ padding: '8px', backgroundColor: 'var(--background)', color: 'var(--primary)' }}>
                       <Plus size={20} />
