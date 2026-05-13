@@ -1,0 +1,226 @@
+import React, { useState, useEffect } from 'react';
+import { supabase } from './supabase';
+import { useAuth } from './AuthContext';
+import { Link } from 'react-router-dom';
+import { CheckCircle2, Circle, Plus, Settings, Search, Image as ImageIcon, ShoppingBag } from 'lucide-react';
+
+export default function ShoppingList() {
+  const { user } = useAuth();
+  const [items, setItems] = useState([]);
+  const [familyId, setFamilyId] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [allProducts, setAllProducts] = useState([]);
+  const [showAutocomplete, setShowAutocomplete] = useState(false);
+
+  useEffect(() => {
+    if (user) loadData();
+  }, [user]);
+
+  const loadData = async () => {
+    const { data: userFamilies } = await supabase.from('user_families').select('family_id').eq('user_id', user.id).single();
+    if (!userFamilies) return;
+    const fid = userFamilies.family_id;
+    setFamilyId(fid);
+
+    fetchItems(fid);
+
+    const { data: products } = await supabase.from('products').select('*').eq('family_id', fid);
+    if (products) setAllProducts(products);
+
+    // Tempo Real (Realtime)
+    const channel = supabase.channel('list_updates')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'list_items', filter: `family_id=eq.${fid}` }, () => {
+        fetchItems(fid); 
+      })
+      .subscribe();
+
+    return () => supabase.removeChannel(channel);
+  };
+
+  const fetchItems = async (fid) => {
+    const { data } = await supabase
+      .from('list_items')
+      .select(`
+        id, quantity, is_purchased,
+        product:products(id, name, thumbnail_url, area_id, area:areas(id, name, order_index))
+      `)
+      .eq('family_id', fid);
+    
+    if (data) setItems(data);
+  };
+
+  const togglePurchased = async (id, currentStatus) => {
+    setItems(items.map(item => item.id === id ? { ...item, is_purchased: !currentStatus } : item));
+    await supabase.from('list_items').update({ is_purchased: !currentStatus }).eq('id', id);
+  };
+
+  const addExistingProduct = async (product) => {
+    setSearchQuery('');
+    setShowAutocomplete(false);
+    
+    const existing = items.find(i => i.product.id === product.id);
+    if (existing) {
+      await supabase.from('list_items').update({ is_purchased: false }).eq('id', existing.id);
+      return;
+    }
+
+    await supabase.from('list_items').insert([{
+      family_id: familyId,
+      product_id: product.id,
+      quantity: '1',
+      is_purchased: false
+    }]);
+  };
+
+  const finishShopping = async () => {
+    if (window.confirm('Tem certeza que deseja finalizar as compras? Os itens marcados vão sumir da lista.')) {
+      const purchasedIds = items.filter(i => i.is_purchased).map(i => i.id);
+      if (purchasedIds.length > 0) {
+        await supabase.from('list_items').delete().in('id', purchasedIds);
+      }
+    }
+  };
+
+  // Agrupa os itens pela "Área" para facilitar no mercado
+  const groupedItems = items.reduce((acc, item) => {
+    const areaName = item.product.area?.name || 'Sem Corredor';
+    const orderIndex = item.product.area?.order_index || 999;
+    if (!acc[areaName]) acc[areaName] = { order: orderIndex, items: [], purchased: [] };
+    
+    if (item.is_purchased) {
+      acc[areaName].purchased.push(item);
+    } else {
+      acc[areaName].items.push(item);
+    }
+    return acc;
+  }, {});
+
+  const sortedAreas = Object.keys(groupedItems).sort((a, b) => groupedItems[a].order - groupedItems[b].order);
+  const filteredCatalog = allProducts.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 5);
+  const showCatalogDropdown = showAutocomplete && searchQuery.length > 0;
+
+  return (
+    <div style={{ paddingBottom: '80px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+        <h2 style={{ fontSize: '1.5rem' }}>Lista de Compras</h2>
+        <Link to="/areas" style={{ color: 'var(--text-muted)' }}><Settings size={24} /></Link>
+      </div>
+
+      <div style={{ position: 'relative', marginBottom: '24px', zIndex: 20 }}>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <div style={{ position: 'relative', flex: 1 }}>
+            <Search size={20} style={{ position: 'absolute', left: '12px', top: '12px', color: 'var(--text-muted)' }} />
+            <input 
+              className="input-field" 
+              placeholder="O que está faltando?" 
+              style={{ paddingLeft: '40px' }}
+              value={searchQuery}
+              onChange={e => { setSearchQuery(e.target.value); setShowAutocomplete(true); }}
+              onFocus={() => setShowAutocomplete(true)}
+            />
+          </div>
+          <Link to="/add" className="btn btn-primary" style={{ padding: '0 16px' }}>
+            <Plus />
+          </Link>
+        </div>
+
+        {showCatalogDropdown && (
+          <div className="card" style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: '8px', padding: '8px 0', zIndex: 100 }}>
+            {filteredCatalog.map(p => (
+              <div 
+                key={p.id} 
+                onClick={() => addExistingProduct(p)}
+                style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', borderBottom: '1px solid var(--border)' }}
+              >
+                {p.thumbnail_url ? (
+                  <img src={p.thumbnail_url} alt="" style={{ width: 32, height: 32, borderRadius: 4, objectFit: 'cover' }} />
+                ) : (
+                  <div style={{ width: 32, height: 32, borderRadius: 4, backgroundColor: 'var(--background)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <ImageIcon size={16} color="var(--text-muted)" />
+                  </div>
+                )}
+                <span>{p.name}</span>
+              </div>
+            ))}
+            {filteredCatalog.length === 0 && (
+              <div style={{ padding: '12px 16px', color: 'var(--text-muted)', textAlign: 'center' }}>
+                Produto não encontrado. <br/> Clique em <b>+</b> para cadastrar e tirar foto.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {items.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)' }}>
+          <ShoppingBag size={48} style={{ opacity: 0.2, margin: '0 auto 16px' }} />
+          <p>Sua lista está vazia.</p>
+          <p style={{ fontSize: '0.875rem', marginTop: '8px' }}>Use a barra acima para adicionar produtos.</p>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          {sortedAreas.map(areaName => {
+            const group = groupedItems[areaName];
+            if (group.items.length === 0 && group.purchased.length === 0) return null;
+            
+            return (
+              <div key={areaName}>
+                <h3 style={{ fontSize: '1.125rem', marginBottom: '12px', color: 'var(--primary)' }}>
+                  {areaName}
+                </h3>
+                
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {group.items.map(item => (
+                    <div key={item.id} className="card" onClick={() => togglePurchased(item.id, item.is_purchased)}
+                         style={{ marginBottom: 0, padding: '12px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', transition: 'all 0.2s' }}>
+                      <Circle color="var(--text-muted)" size={24} />
+                      
+                      {item.product.thumbnail_url ? (
+                        <img src={item.product.thumbnail_url} style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover' }} />
+                      ) : (
+                        <div style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: 'var(--background)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <ImageIcon size={20} color="var(--text-muted)" />
+                        </div>
+                      )}
+                      
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600 }}>{item.product.name}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {group.purchased.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: group.items.length > 0 ? '8px' : '0' }}>
+                    {group.purchased.map(item => (
+                      <div key={item.id} className="card" onClick={() => togglePurchased(item.id, item.is_purchased)}
+                           style={{ marginBottom: 0, padding: '12px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', opacity: 0.6, backgroundColor: 'var(--background)' }}>
+                        <CheckCircle2 color="var(--secondary)" size={24} />
+                        
+                        {item.product.thumbnail_url && (
+                          <img src={item.product.thumbnail_url} style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover', filter: 'grayscale(100%)' }} />
+                        )}
+                        
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 600, textDecoration: 'line-through' }}>{item.product.name}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {items.some(i => i.is_purchased) && (
+        <div style={{ position: 'fixed', bottom: '24px', left: '0', right: '0', display: 'flex', justifyContent: 'center', padding: '0 20px', zIndex: 30 }}>
+          <button onClick={finishShopping} className="btn btn-primary" style={{ width: '100%', maxWidth: '600px', padding: '16px', boxShadow: 'var(--shadow-lg)', backgroundColor: 'var(--secondary)' }}>
+            Finalizar Compra (Comprei!)
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
