@@ -19,6 +19,7 @@ export default function AddProduct() {
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [successMsg, setSuccessMsg] = useState('');
 
   useEffect(() => {
     loadAreas();
@@ -97,6 +98,7 @@ export default function AddProduct() {
         }).eq('id', editingProduct.id);
         
         if (productError) throw productError;
+        navigate('/catalog');
       } else {
         // Pega o número de itens na área para colocar no fim da fila
         const { count } = await supabase.from('products').select('*', { count: 'exact', head: true }).eq('area_id', selectedArea);
@@ -106,15 +108,20 @@ export default function AddProduct() {
         const { error: productError } = await supabase.from('products').insert([{
           family_id: familyId,
           area_id: selectedArea,
-          name,
+          name: name.trim(),
           thumbnail_url: thumbnailUrl,
           order_index: newIndex
         }]);
 
         if (productError) throw productError;
+        
+        // Em vez de voltar, limpa o formulário para adicionar outro!
+        setSuccessMsg(`"${name}" foi salvo!`);
+        setName('');
+        setImageFile(null);
+        setImagePreview(null);
+        setTimeout(() => setSuccessMsg(''), 3000);
       }
-
-      navigate('/catalog');
     } catch (err) {
       console.error(err);
       alert('Erro ao salvar produto. Tente novamente.');
@@ -188,8 +195,14 @@ export default function AddProduct() {
         </div>
 
         <button type="submit" className="btn btn-primary" disabled={loading} style={{ padding: '16px', fontSize: '1.125rem' }}>
-          {loading ? 'Salvando...' : 'Salvar no Catálogo'}
+          {loading ? 'Salvando...' : (editingProduct ? 'Salvar Alterações' : 'Salvar e Adicionar Outro')}
         </button>
+
+        {successMsg && (
+          <div style={{ padding: '12px', backgroundColor: 'var(--secondary)', color: 'white', borderRadius: '8px', textAlign: 'center', fontWeight: 500, animation: 'fadeIn 0.3s ease' }}>
+            ✓ {successMsg}
+          </div>
+        )}
       </form>
     </div>
   );
