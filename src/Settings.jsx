@@ -48,8 +48,14 @@ export default function SettingsPage() {
         return;
       }
 
-      // Muda o usuário para a nova família
-      const { error } = await supabase.from('user_families').update({ family_id: inviteCode.trim() }).eq('user_id', user.id);
+      // Remove da família antiga e insere na nova (mais seguro do que UPDATE em chaves primárias compostas)
+      await supabase.from('user_families').delete().eq('user_id', user.id);
+      
+      const { error } = await supabase.from('user_families').insert([{ 
+        user_id: user.id, 
+        family_id: inviteCode.trim() 
+      }]);
+
       if (error) throw error;
 
       alert('Sincronizado com sucesso! Agora vocês dividem a mesma lista.');
