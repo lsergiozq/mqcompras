@@ -10,6 +10,7 @@ export default function AddProduct() {
   const navigate = useNavigate();
   const location = useLocation();
   const editingProduct = location.state?.product || null;
+  const preSelectedArea = location.state?.preSelectedArea || null;
 
   const [areas, setAreas] = useState([]);
   const [name, setName] = useState('');
@@ -30,8 +31,10 @@ export default function AddProduct() {
       if (editingProduct.thumbnail_url) {
         setImagePreview(editingProduct.thumbnail_url);
       }
+    } else if (preSelectedArea && areas.length > 0) {
+      setSelectedArea(preSelectedArea);
     }
-  }, [editingProduct, areas]);
+  }, [editingProduct, preSelectedArea, areas]);
 
   const loadAreas = async () => {
     let { data: userFamilies } = await supabase.from('user_families').select('family_id').eq('user_id', user.id);

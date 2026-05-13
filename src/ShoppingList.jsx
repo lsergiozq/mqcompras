@@ -105,7 +105,7 @@ export default function ShoppingList() {
   // Agrupa os itens pela "Área" para facilitar no mercado
   const groupedItems = items.reduce((acc, item) => {
     const areaName = item.product.area?.name || 'Sem Corredor';
-    const orderIndex = item.product.area?.order_index || 999;
+    const orderIndex = item.product.area?.order_index ?? 999;
     if (!acc[areaName]) acc[areaName] = { order: orderIndex, items: [], purchased: [] };
     
     if (item.is_purchased) {

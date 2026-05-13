@@ -37,7 +37,7 @@ export default function Catalog() {
   const groupedProducts = filteredProducts.reduce((acc, p) => {
     const areaName = p.area?.name || 'Sem Corredor';
     const areaId = p.area_id;
-    const orderIndex = p.area?.order_index || 999;
+    const orderIndex = p.area?.order_index ?? 999;
     if (!acc[areaName]) acc[areaName] = { order: orderIndex, areaId: areaId, items: [] };
     acc[areaName].items.push(p);
     return acc;
@@ -169,7 +169,15 @@ export default function Catalog() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           {sortedAreas.map(areaName => (
             <div key={areaName}>
-              <h3 style={{ fontSize: '1.125rem', marginBottom: '12px', color: 'var(--primary)' }}>{areaName}</h3>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <h3 style={{ fontSize: '1.125rem', color: 'var(--primary)', margin: 0 }}>{areaName}</h3>
+                <button 
+                  onClick={() => navigate('/add', { state: { preSelectedArea: groupedProducts[areaName].areaId } })} 
+                  style={{ background: 'var(--primary)', border: 'none', color: 'white', borderRadius: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '4px 10px', gap: '4px', fontSize: '0.75rem', fontWeight: 600 }}
+                >
+                  <Plus size={14} /> Novo aqui
+                </button>
+              </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {groupedProducts[areaName].items.map((p, index) => (
                   <div key={p.id} className="card" style={{ marginBottom: 0, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: '12px' }}>
