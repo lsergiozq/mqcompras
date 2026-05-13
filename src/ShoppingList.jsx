@@ -17,18 +17,29 @@ export default function ShoppingList() {
   }, [user]);
 
   const loadData = async () => {
-    const { data: userFamilies } = await supabase.from('user_families').select('family_id').eq('user_id', user.id).single();
-    if (!userFamilies) return;
-    const fid = userFamilies.family_id;
-    setFamilyId(fid);
+    let { data: userFamilies } = await supabase.from('user_families').select('family_id').eq('user_id', user.id);
+    
+    let fid = null;
+    if (!userFamilies || userFamilies.length === 0) {
+      const { data: newFamily } = await supabase.from('families').insert([{ name: 'Minha Família' }]).select().single();
+      fid = newFamily.id;
+      await supabase.from('user_families').insert([{ user_id: user.id, family_id: fid }]);
 
+      const defaultAreas = ['Hortifruti', 'Padaria', 'Frios', 'Açougue', 'Limpeza', 'Mercearia'];
+      const areasToInsert = defaultAreas.map((name, index) => ({ family_id: fid, name, order_index: index }));
+      await supabase.from('areas').insert(areasToInsert);
+    } else {
+      fid = userFamilies[0].family_id;
+    }
+
+    setFamilyId(fid);
     fetchItems(fid);
 
     const { data: products } = await supabase.from('products').select('*').eq('family_id', fid);
     if (products) setAllProducts(products);
 
     // Tempo Real (Realtime)
-    const channel = supabase.channel('list_updates')
+    const channel = supabase.channel(`list_updates_${Date.now()}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'list_items', filter: `family_id=eq.${fid}` }, () => {
         fetchItems(fid); 
       })
@@ -42,7 +53,7 @@ export default function ShoppingList() {
       .from('list_items')
       .select(`
         id, quantity, is_purchased,
-        product:products(id, name, thumbnail_url, area_id, area:areas(id, name, order_index))
+        product:products(id, name, thumbnail_url, area_id, order_index, area:areas(id, name, order_index))
       `)
       .eq('family_id', fid);
     
@@ -58,18 +69,28 @@ export default function ShoppingList() {
     setSearchQuery('');
     setShowAutocomplete(false);
     
-    const existing = items.find(i => i.product.id === product.id);
-    if (existing) {
-      await supabase.from('list_items').update({ is_purchased: false }).eq('id', existing.id);
-      return;
-    }
+    let qty = window.prompt('Quantidade?', '1');
+    if (qty === null) return;
+    if (qty.trim() === '') qty = '1';
+    
+    const { data: existingArray } = await supabase.from('list_items').select('*').eq('product_id', product.id).limit(1);
+    const existing = existingArray && existingArray.length > 0 ? existingArray[0] : null;
 
-    await supabase.from('list_items').insert([{
-      family_id: familyId,
-      product_id: product.id,
-      quantity: '1',
-      is_purchased: false
-    }]);
+    if (existing) {
+      if (!existing.is_purchased) {
+        alert('Este item já está na sua lista de compras! Você pode alterar a quantidade clicando no número abaixo do nome dele.');
+        return;
+      } else {
+        await supabase.from('list_items').update({ is_purchased: false, quantity: qty }).eq('id', existing.id);
+      }
+    } else {
+      await supabase.from('list_items').insert([{
+        family_id: familyId,
+        product_id: product.id,
+        quantity: qty,
+        is_purchased: false
+      }]);
+    }
   };
 
   const finishShopping = async () => {
@@ -94,6 +115,18 @@ export default function ShoppingList() {
     }
     return acc;
   }, {});
+
+  // Ordena pela posição definida manualmente no catálogo (fallback alfabético)
+  Object.keys(groupedItems).forEach(key => {
+    groupedItems[key].items.sort((a, b) => {
+      if (a.product.order_index === b.product.order_index) return a.product.name.localeCompare(b.product.name);
+      return (a.product.order_index || 0) - (b.product.order_index || 0);
+    });
+    groupedItems[key].purchased.sort((a, b) => {
+      if (a.product.order_index === b.product.order_index) return a.product.name.localeCompare(b.product.name);
+      return (a.product.order_index || 0) - (b.product.order_index || 0);
+    });
+  });
 
   const sortedAreas = Object.keys(groupedItems).sort((a, b) => groupedItems[a].order - groupedItems[b].order);
   const filteredCatalog = allProducts.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 5);
@@ -185,6 +218,18 @@ export default function ShoppingList() {
                       
                       <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 600 }}>{item.product.name}</div>
+                        <div 
+                          style={{ fontSize: '0.875rem', color: 'var(--primary)', cursor: 'pointer', display: 'inline-block', padding: '2px 6px', backgroundColor: 'var(--background)', borderRadius: '4px', marginTop: '4px', fontWeight: 500 }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const newQty = window.prompt('Nova quantidade:', item.quantity);
+                            if (newQty !== null && newQty.trim() !== '') {
+                              supabase.from('list_items').update({ quantity: newQty.trim() }).eq('id', item.id).then(() => fetchItems(familyId));
+                            }
+                          }}
+                        >
+                          Qtd: {item.quantity}
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -203,6 +248,7 @@ export default function ShoppingList() {
                         
                         <div style={{ flex: 1 }}>
                           <div style={{ fontWeight: 600, textDecoration: 'line-through' }}>{item.product.name}</div>
+                          <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginTop: '4px' }}>Qtd: {item.quantity}</div>
                         </div>
                       </div>
                     ))}

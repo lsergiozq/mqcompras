@@ -11,6 +11,7 @@ export default function AddProduct() {
   const [areas, setAreas] = useState([]);
   const [name, setName] = useState('');
   const [selectedArea, setSelectedArea] = useState('');
+  const [familyId, setFamilyId] = useState(null);
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -20,12 +21,27 @@ export default function AddProduct() {
   }, [user]);
 
   const loadAreas = async () => {
-    const { data: userFamilies } = await supabase.from('user_families').select('family_id').eq('user_id', user.id);
-    if (userFamilies && userFamilies.length > 0) {
-      const { data } = await supabase.from('areas').select('*').eq('family_id', userFamilies[0].family_id).order('order_index');
-      setAreas(data || []);
-      if (data && data.length > 0) setSelectedArea(data[0].id);
+    let { data: userFamilies } = await supabase.from('user_families').select('family_id').eq('user_id', user.id);
+    
+    let fid = null;
+    // Se por acaso o usuário não tiver família ainda, cria uma padrão
+    if (!userFamilies || userFamilies.length === 0) {
+      const { data: newFamily } = await supabase.from('families').insert([{ name: 'Minha Família' }]).select().single();
+      fid = newFamily.id;
+      await supabase.from('user_families').insert([{ user_id: user.id, family_id: fid }]);
+
+      const defaultAreas = ['Hortifruti', 'Padaria', 'Frios', 'Açougue', 'Limpeza', 'Mercearia'];
+      const areasToInsert = defaultAreas.map((n, index) => ({ family_id: fid, name: n, order_index: index }));
+      await supabase.from('areas').insert(areasToInsert);
+    } else {
+      fid = userFamilies[0].family_id;
     }
+
+    setFamilyId(fid);
+
+    const { data } = await supabase.from('areas').select('*').eq('family_id', fid).order('order_index');
+    setAreas(data || []);
+    if (data && data.length > 0) setSelectedArea(data[0].id);
   };
 
   const handleImageChange = async (e) => {
@@ -39,13 +55,13 @@ export default function AddProduct() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!name || !selectedArea) return;
+    if (!name || !selectedArea || !familyId) {
+      alert('Preencha o nome e o corredor!');
+      return;
+    }
     setLoading(true);
 
     try {
-      const { data: userFamilies } = await supabase.from('user_families').select('family_id').eq('user_id', user.id).single();
-      const familyId = userFamilies.family_id;
-
       let thumbnailUrl = null;
 
       if (imageFile) {
@@ -57,26 +73,25 @@ export default function AddProduct() {
         }
       }
 
+      // Pega o número de itens na área para colocar no fim da fila
+      const { count } = await supabase.from('products').select('*', { count: 'exact', head: true }).eq('area_id', selectedArea);
+      const newIndex = (count || 0) * 10;
+
       // Salva no catálogo
-      const { data: product } = await supabase.from('products').insert([{
+      const { data: product, error: productError } = await supabase.from('products').insert([{
         family_id: familyId,
         area_id: selectedArea,
         name,
-        thumbnail_url: thumbnailUrl
+        thumbnail_url: thumbnailUrl,
+        order_index: newIndex
       }]).select().single();
 
-      // Já adiciona direto na lista de compras ativa
-      await supabase.from('list_items').insert([{
-        family_id: familyId,
-        product_id: product.id,
-        quantity: '1',
-        is_purchased: false
-      }]);
+      if (productError) throw productError;
 
-      navigate('/');
+      navigate('/catalog');
     } catch (err) {
       console.error(err);
-      alert('Erro ao salvar produto');
+      alert('Erro ao salvar produto. Tente novamente.');
     }
     setLoading(false);
   };
@@ -84,7 +99,7 @@ export default function AddProduct() {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: '24px', gap: '12px' }}>
-        <Link to="/" style={{ color: 'var(--text-main)' }}><ArrowLeft /></Link>
+        <Link to="/catalog" style={{ color: 'var(--text-main)' }}><ArrowLeft /></Link>
         <h2 style={{ fontSize: '1.25rem' }}>Novo Produto</h2>
       </div>
 
@@ -145,7 +160,7 @@ export default function AddProduct() {
         </div>
 
         <button type="submit" className="btn btn-primary" disabled={loading} style={{ padding: '16px', fontSize: '1.125rem' }}>
-          {loading ? 'Salvando...' : 'Adicionar à Lista'}
+          {loading ? 'Salvando...' : 'Salvar no Catálogo'}
         </button>
       </form>
     </div>

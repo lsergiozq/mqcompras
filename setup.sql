@@ -28,6 +28,7 @@ create table public.products (
   area_id uuid references public.areas not null,
   name text not null,
   thumbnail_url text,
+  order_index integer default 0 not null,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
