@@ -10,6 +10,7 @@ export default function Catalog() {
   const [products, setProducts] = useState([]);
   const [familyId, setFamilyId] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [toastMsg, setToastMsg] = useState('');
 
   useEffect(() => {
     if (user) loadCatalog();
@@ -68,7 +69,8 @@ export default function Catalog() {
         is_purchased: false
       }]);
     }
-    alert('Adicionado à lista de compras!');
+    setToastMsg('✓ Adicionado à lista');
+    setTimeout(() => setToastMsg(''), 2500);
   };
 
   const handleEditProduct = (product) => {
@@ -165,6 +167,10 @@ export default function Catalog() {
           <p>Você ainda não cadastrou nenhum produto.</p>
           <p style={{ fontSize: '0.875rem', marginTop: '8px' }}>Cadastre os produtos que sua casa consome clicando em "Novo".</p>
         </div>
+      ) : sortedAreas.length === 0 ? (
+        <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: '48px' }}>
+          <p>Nenhum produto encontrado.</p>
+        </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           {sortedAreas.map(areaName => (
@@ -224,6 +230,19 @@ export default function Catalog() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {toastMsg && (
+        <div style={{
+          position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)',
+          backgroundColor: 'var(--primary)', color: 'white',
+          padding: '12px 24px', borderRadius: '24px',
+          boxShadow: 'var(--shadow-lg)', zIndex: 1000,
+          animation: 'fadeInOut 2.5s ease forwards',
+          fontWeight: 600, whiteSpace: 'nowrap'
+        }}>
+          {toastMsg}
         </div>
       )}
     </div>
