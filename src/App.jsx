@@ -1,5 +1,5 @@
 import React from 'react';
-import { LogOut, ListTodo, Library, Settings } from 'lucide-react';
+import { LogOut, ListTodo, Library, Settings as SettingsIcon } from 'lucide-react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 import { useAuth } from './AuthContext';
 import { supabase } from './supabase';
@@ -8,6 +8,7 @@ import ShoppingList from './ShoppingList';
 import Areas from './Areas';
 import AddProduct from './AddProduct';
 import Catalog from './Catalog';
+import SettingsPage from './Settings';
 
 function PrivateRoute({ children }) {
   const { user, loading } = useAuth();
@@ -31,9 +32,9 @@ function BottomNav() {
         <Library size={24} />
         <span>Catálogo</span>
       </Link>
-      <Link to="/areas" className={`nav-item ${location.pathname === '/areas' ? 'active' : ''}`}>
-        <Settings size={24} />
-        <span>Corredores</span>
+      <Link to="/settings" className={`nav-item ${location.pathname.startsWith('/settings') || location.pathname === '/areas' ? 'active' : ''}`}>
+        <SettingsIcon size={24} />
+        <span>Ajustes</span>
       </Link>
     </nav>
   );
@@ -65,6 +66,7 @@ function App() {
             <Route path="/login" element={user ? <Navigate to="/" /> : <Auth />} />
             <Route path="/" element={<PrivateRoute><ShoppingList /></PrivateRoute>} />
             <Route path="/catalog" element={<PrivateRoute><Catalog /></PrivateRoute>} />
+            <Route path="/settings" element={<PrivateRoute><SettingsPage /></PrivateRoute>} />
             <Route path="/areas" element={<PrivateRoute><Areas /></PrivateRoute>} />
             <Route path="/add" element={<PrivateRoute><AddProduct /></PrivateRoute>} />
           </Routes>

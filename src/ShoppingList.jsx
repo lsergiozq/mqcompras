@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import { useAuth } from './AuthContext';
 import { Link } from 'react-router-dom';
-import { CheckCircle2, Circle, Plus, Settings, Search, Image as ImageIcon, ShoppingBag } from 'lucide-react';
+import { CheckCircle2, Circle, Plus, Search, Image as ImageIcon, ShoppingBag } from 'lucide-react';
 
 export default function ShoppingList() {
   const { user } = useAuth();

@@ -81,6 +81,7 @@ export default function Areas() {
   return (
     <div style={{ paddingBottom: '80px' }}>
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: '16px', gap: '12px' }}>
+        <Link to="/settings" style={{ color: 'var(--text-main)' }}><ArrowLeft /></Link>
         <h2 style={{ fontSize: '1.25rem' }}>Organizar Corredores</h2>
       </div>
 
