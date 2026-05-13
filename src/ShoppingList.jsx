@@ -136,7 +136,6 @@ export default function ShoppingList() {
     <div style={{ paddingBottom: '80px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
         <h2 style={{ fontSize: '1.5rem' }}>Lista de Compras</h2>
-        <Link to="/areas" style={{ color: 'var(--text-muted)' }}><Settings size={24} /></Link>
       </div>
 
       <div style={{ position: 'relative', marginBottom: '24px', zIndex: 20 }}>
