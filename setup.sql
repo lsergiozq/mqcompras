@@ -62,3 +62,8 @@ create policy "Enable all for authenticated users" on public.list_items for all 
 insert into storage.buckets (id, name, public) values ('thumbnails', 'thumbnails', true);
 create policy "Public Access" on storage.objects for select using ( bucket_id = 'thumbnails' );
 create policy "Auth Insert" on storage.objects for insert to authenticated with check ( bucket_id = 'thumbnails' );
+
+-- Ativar o Realtime para as tabelas (Sincronização ao vivo)
+alter publication supabase_realtime add table public.list_items;
+alter publication supabase_realtime add table public.products;
+alter publication supabase_realtime add table public.areas;
