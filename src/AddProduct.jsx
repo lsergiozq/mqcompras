@@ -2,9 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import { useAuth } from './AuthContext';
 import { usePlace } from './PlaceContext';
-import { ArrowLeft, Camera } from 'lucide-react';
+import { ArrowLeft /*, Camera */ } from 'lucide-react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { compressImage } from './imageUtils';
+// import { compressImage } from './imageUtils'; // [IMG-OFF] reativar quando voltar com upload de imagens
 
 export default function AddProduct() {
   const { user } = useAuth();
@@ -17,8 +17,9 @@ export default function AddProduct() {
   const [areas, setAreas] = useState([]);
   const [name, setName] = useState('');
   const [selectedArea, setSelectedArea] = useState('');
-  const [imageFile, setImageFile] = useState(null);
-  const [imagePreview, setImagePreview] = useState(null);
+  // [IMG-OFF] estados de imagem desabilitados para economizar Storage no Supabase.
+  // const [imageFile, setImageFile] = useState(null);
+  // const [imagePreview, setImagePreview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   // Mitigante 2: também adicionar este produto a outros Locais do usuário
@@ -35,9 +36,10 @@ export default function AddProduct() {
     if (editingProduct && areas.length > 0) {
       setName(editingProduct.name);
       setSelectedArea(editingProduct.area_id);
-      if (editingProduct.thumbnail_url) {
-        setImagePreview(editingProduct.thumbnail_url);
-      }
+      // [IMG-OFF] desabilitado para não exibir/atualizar imagens enquanto a captura está off.
+      // if (editingProduct.thumbnail_url) {
+      //   setImagePreview(editingProduct.thumbnail_url);
+      // }
     } else if (preSelectedArea && areas.length > 0) {
       setSelectedArea(preSelectedArea);
     }
@@ -55,14 +57,15 @@ export default function AddProduct() {
     }
   };
 
-  const handleImageChange = async (e) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      const compressedFile = await compressImage(file);
-      setImageFile(compressedFile);
-      setImagePreview(URL.createObjectURL(compressedFile));
-    }
-  };
+  // [IMG-OFF] captura de foto desabilitada (controle de custo do Storage). Reativar quando voltar com imagens.
+  // const handleImageChange = async (e) => {
+  //   if (e.target.files && e.target.files[0]) {
+  //     const file = e.target.files[0];
+  //     const compressedFile = await compressImage(file);
+  //     setImageFile(compressedFile);
+  //     setImagePreview(URL.createObjectURL(compressedFile));
+  //   }
+  // };
 
   const togglePlaceChip = (placeId) => {
     setAlsoAddToPlaces(prev =>
@@ -79,16 +82,19 @@ export default function AddProduct() {
     setLoading(true);
 
     try {
+      // [IMG-OFF] mantém qualquer thumbnail já existente, mas não envia novas imagens.
       let thumbnailUrl = editingProduct?.thumbnail_url || null;
 
-      if (imageFile) {
-        const fileName = `${currentPlaceId}/${Date.now()}-${Math.random().toString(36).substring(7)}.jpg`;
-        const { error: uploadError } = await supabase.storage.from('thumbnails').upload(fileName, imageFile);
-        if (!uploadError) {
-          const { data } = supabase.storage.from('thumbnails').getPublicUrl(fileName);
-          thumbnailUrl = data.publicUrl;
-        }
-      }
+      // [IMG-OFF] upload desabilitado. Para reativar, descomentar o bloco abaixo
+      // e os 'useState' / 'handleImageChange' / JSX do card de foto.
+      // if (imageFile) {
+      //   const fileName = `${currentPlaceId}/${Date.now()}-${Math.random().toString(36).substring(7)}.jpg`;
+      //   const { error: uploadError } = await supabase.storage.from('thumbnails').upload(fileName, imageFile);
+      //   if (!uploadError) {
+      //     const { data } = supabase.storage.from('thumbnails').getPublicUrl(fileName);
+      //     thumbnailUrl = data.publicUrl;
+      //   }
+      // }
 
       if (editingProduct) {
         const { error: productError } = await supabase.from('products').update({
@@ -131,8 +137,9 @@ export default function AddProduct() {
           : '';
         setSuccessMsg(`"${name}" foi salvo!${extraMsg}`);
         setName('');
-        setImageFile(null);
-        setImagePreview(null);
+        // [IMG-OFF]
+        // setImageFile(null);
+        // setImagePreview(null);
         setAlsoAddToPlaces([]);
         setTimeout(() => setSuccessMsg(''), 3000);
       }
@@ -176,37 +183,43 @@ export default function AddProduct() {
           </select>
         </div>
 
-        <div className="card" style={{ marginBottom: 0 }}>
-          <label style={{ display: 'block', marginBottom: '8px', fontWeight: 500 }}>Foto (opcional)</label>
-          <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '12px' }}>
-            {editingProduct && editingProduct.thumbnail_url
-              ? 'Tire uma nova foto se quiser substituir a atual.'
-              : 'Tire uma foto para facilitar na hora de achar no mercado.'}
-          </p>
+        {/* [IMG-OFF] Card de foto desabilitado para controlar custo do Supabase Storage.
+            Para reativar, trocar `false` por `true` e descomentar os imports/states/handler de imagem acima. */}
+        {false && (
+          <div className="card" style={{ marginBottom: 0 }}>
+            <label style={{ display: 'block', marginBottom: '8px', fontWeight: 500 }}>Foto (opcional)</label>
+            <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '12px' }}>
+              {editingProduct && editingProduct.thumbnail_url
+                ? 'Tire uma nova foto se quiser substituir a atual.'
+                : 'Tire uma foto para facilitar na hora de achar no mercado.'}
+            </p>
 
-          <label style={{
-            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-            border: '2px dashed var(--border)', borderRadius: 'var(--radius-lg)', padding: '24px',
-            cursor: 'pointer', backgroundColor: 'var(--background)', color: 'var(--primary)',
-            position: 'relative', overflow: 'hidden'
-          }}>
-            <input
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={handleImageChange}
-              style={{ display: 'none' }}
-            />
-            {imagePreview ? (
-              <img src={imagePreview} alt="Preview" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
-            ) : (
-              <>
-                <Camera size={32} style={{ marginBottom: '8px' }} />
-                <span style={{ fontWeight: 600 }}>Tirar foto</span>
-              </>
-            )}
-          </label>
-        </div>
+            {/*
+            <label style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+              border: '2px dashed var(--border)', borderRadius: 'var(--radius-lg)', padding: '24px',
+              cursor: 'pointer', backgroundColor: 'var(--background)', color: 'var(--primary)',
+              position: 'relative', overflow: 'hidden'
+            }}>
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={handleImageChange}
+                style={{ display: 'none' }}
+              />
+              {imagePreview ? (
+                <img src={imagePreview} alt="Preview" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : (
+                <>
+                  <Camera size={32} style={{ marginBottom: '8px' }} />
+                  <span style={{ fontWeight: 600 }}>Tirar foto</span>
+                </>
+              )}
+            </label>
+            */}
+          </div>
+        )}
 
         {showAlsoAdd && (
           <div className="card" style={{ marginBottom: 0 }}>

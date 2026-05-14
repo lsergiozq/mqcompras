@@ -156,6 +156,7 @@ export default function ImportFromPlace() {
                     ? <CheckSquare color="var(--primary)" size={22} />
                     : <Square color="var(--text-muted)" size={22} />}
 
+                  {/* [IMG-OFF] Thumbnail desabilitada.
                   {p.thumbnail_url ? (
                     <img src={p.thumbnail_url} alt="" style={{ width: 36, height: 36, borderRadius: 6, objectFit: 'cover' }} />
                   ) : (
@@ -163,6 +164,7 @@ export default function ImportFromPlace() {
                       <ImageIcon size={18} color="var(--text-muted)" />
                     </div>
                   )}
+                  */}
 
                   <span style={{ flex: 1, fontWeight: 500 }}>{p.name}</span>
                 </div>

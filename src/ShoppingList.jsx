@@ -167,6 +167,7 @@ export default function ShoppingList() {
                 onClick={() => addExistingProduct(p)}
                 style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', borderBottom: '1px solid var(--border)' }}
               >
+                {/* [IMG-OFF] Miniatura desabilitada. Para reativar, restaurar bloco original.
                 {p.thumbnail_url ? (
                   <img src={p.thumbnail_url} alt="" style={{ width: 32, height: 32, borderRadius: 4, objectFit: 'cover' }} />
                 ) : (
@@ -174,6 +175,7 @@ export default function ShoppingList() {
                     <ImageIcon size={16} color="var(--text-muted)" />
                   </div>
                 )}
+                */}
                 <span>{p.name}</span>
               </div>
             ))}
@@ -210,6 +212,7 @@ export default function ShoppingList() {
                          style={{ marginBottom: 0, padding: '12px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', transition: 'all 0.2s' }}>
                       <Circle color="var(--text-muted)" size={24} />
 
+                      {/* [IMG-OFF] Thumbnail desabilitada.
                       {item.product.thumbnail_url ? (
                         <img src={item.product.thumbnail_url} style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover' }} />
                       ) : (
@@ -217,6 +220,7 @@ export default function ShoppingList() {
                           <ImageIcon size={20} color="var(--text-muted)" />
                         </div>
                       )}
+                      */}
 
                       <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 600 }}>{item.product.name}</div>
@@ -248,9 +252,11 @@ export default function ShoppingList() {
                            style={{ marginBottom: 0, padding: '12px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', opacity: 0.6, backgroundColor: 'var(--background)' }}>
                         <CheckCircle2 color="var(--secondary)" size={24} />
 
+                        {/* [IMG-OFF] Thumbnail desabilitada.
                         {item.product.thumbnail_url && (
                           <img src={item.product.thumbnail_url} style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover', filter: 'grayscale(100%)' }} />
                         )}
+                        */}
 
                         <div style={{ flex: 1 }}>
                           <div style={{ fontWeight: 600, textDecoration: 'line-through' }}>{item.product.name}</div>

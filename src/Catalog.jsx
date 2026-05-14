@@ -194,6 +194,7 @@ export default function Catalog() {
                       </div>
                     )}
 
+                    {/* [IMG-OFF] Thumbnail desabilitada para economizar Storage.
                     {p.thumbnail_url ? (
                       <img src={p.thumbnail_url} alt="" style={{ width: 40, height: 40, borderRadius: 6, objectFit: 'cover' }} />
                     ) : (
@@ -201,6 +202,7 @@ export default function Catalog() {
                         <ImageIcon size={20} color="var(--text-muted)" />
                       </div>
                     )}
+                    */}
 
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 500 }}>{p.name}</div>

@@ -115,6 +115,7 @@ export default function History() {
                       alignItems: 'center',
                       gap: '12px',
                     }}>
+                      {/* [IMG-OFF] Thumbnail desabilitada.
                       {item.product?.thumbnail_url ? (
                         <img
                           src={item.product.thumbnail_url}
@@ -134,6 +135,7 @@ export default function History() {
                           <ImageIcon size={20} color="var(--text-muted)" />
                         </div>
                       )}
+                      */}
                       <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 600 }}>{item.product?.name || 'Produto removido'}</div>
                         <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginTop: '4px' }}>
