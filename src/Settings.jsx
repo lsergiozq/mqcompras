@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import { useAuth } from './AuthContext';
-import { Copy, Users, ListTree } from 'lucide-react';
+import { Copy, Users, ListTree, History as HistoryIcon } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 
 export default function SettingsPage() {
@@ -83,6 +83,17 @@ export default function SettingsPage() {
           <div style={{ flex: 1 }}>
             <h3 style={{ fontSize: '1.125rem', marginBottom: '4px' }}>Organizar Corredores</h3>
             <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>Mude a ordem das áreas do seu mercado</p>
+          </div>
+        </Link>
+
+        {/* Menu de Histórico */}
+        <Link to="/history" className="card" style={{ display: 'flex', alignItems: 'center', gap: '16px', textDecoration: 'none', color: 'inherit', marginBottom: 0 }}>
+          <div style={{ padding: '12px', backgroundColor: 'rgba(16, 185, 129, 0.1)', borderRadius: '12px' }}>
+            <HistoryIcon color="var(--secondary)" size={24} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <h3 style={{ fontSize: '1.125rem', marginBottom: '4px' }}>Histórico de Compras</h3>
+            <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>Veja tudo o que você já comprou, por data</p>
           </div>
         </Link>
 

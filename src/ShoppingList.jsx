@@ -55,8 +55,9 @@ export default function ShoppingList() {
         id, quantity, is_purchased,
         product:products(id, name, thumbnail_url, area_id, order_index, area:areas(id, name, order_index))
       `)
-      .eq('family_id', fid);
-    
+      .eq('family_id', fid)
+      .is('archived_at', null);
+
     if (data) setItems(data);
   };
 
@@ -94,10 +95,13 @@ export default function ShoppingList() {
   };
 
   const finishShopping = async () => {
-    if (window.confirm('Tem certeza que deseja finalizar as compras? Os itens marcados vão sumir da lista.')) {
+    if (window.confirm('Tem certeza que deseja finalizar as compras? Os itens marcados serão movidos para o Histórico.')) {
       const purchasedIds = items.filter(i => i.is_purchased).map(i => i.id);
       if (purchasedIds.length > 0) {
-        await supabase.from('list_items').delete().in('id', purchasedIds);
+        const archivedAt = new Date().toISOString();
+        await supabase.from('list_items').update({ archived_at: archivedAt }).in('id', purchasedIds);
+        // Remoção otimista para sentir instantâneo (o realtime confirma depois)
+        setItems(prev => prev.filter(i => !purchasedIds.includes(i.id)));
       }
     }
   };
@@ -132,11 +136,27 @@ export default function ShoppingList() {
   const filteredCatalog = allProducts.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 5);
   const showCatalogDropdown = showAutocomplete && searchQuery.length > 0;
 
+  const totalCount = items.length;
+  const purchasedCount = items.filter(i => i.is_purchased).length;
+  const progressPercent = totalCount > 0 ? Math.round((purchasedCount / totalCount) * 100) : 0;
+
   return (
     <div style={{ paddingBottom: '80px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <h2 style={{ fontSize: '1.5rem' }}>Lista de Compras</h2>
       </div>
+
+      {totalCount > 0 && (
+        <div style={{ marginBottom: '24px' }}>
+          <div className="progress-bar-label">
+            <span>{purchasedCount} de {totalCount} {totalCount === 1 ? 'item' : 'itens'}</span>
+            <span className="progress-percent">{progressPercent}%</span>
+          </div>
+          <div className="progress-bar-wrapper" role="progressbar" aria-valuenow={progressPercent} aria-valuemin={0} aria-valuemax={100}>
+            <div className="progress-bar-fill" style={{ width: `${progressPercent}%` }} />
+          </div>
+        </div>
+      )}
 
       <div style={{ position: 'relative', marginBottom: '24px', zIndex: 20 }}>
         <div style={{ display: 'flex', gap: '8px' }}>

@@ -9,6 +9,8 @@ import Areas from './Areas';
 import AddProduct from './AddProduct';
 import Catalog from './Catalog';
 import SettingsPage from './Settings';
+import History from './History';
+import PWAInstallPrompt from './PWAInstallPrompt';
 
 function PrivateRoute({ children }) {
   const { user, loading } = useAuth();
@@ -32,7 +34,7 @@ function BottomNav() {
         <Library size={24} />
         <span>Catálogo</span>
       </Link>
-      <Link to="/settings" className={`nav-item ${location.pathname.startsWith('/settings') || location.pathname === '/areas' ? 'active' : ''}`}>
+      <Link to="/settings" className={`nav-item ${location.pathname.startsWith('/settings') || location.pathname === '/areas' || location.pathname === '/history' ? 'active' : ''}`}>
         <SettingsIcon size={24} />
         <span>Ajustes</span>
       </Link>
@@ -69,10 +71,12 @@ function App() {
             <Route path="/settings" element={<PrivateRoute><SettingsPage /></PrivateRoute>} />
             <Route path="/areas" element={<PrivateRoute><Areas /></PrivateRoute>} />
             <Route path="/add" element={<PrivateRoute><AddProduct /></PrivateRoute>} />
+            <Route path="/history" element={<PrivateRoute><History /></PrivateRoute>} />
           </Routes>
         </main>
         
         <BottomNav />
+        {user && <PWAInstallPrompt />}
       </div>
     </Router>
   );
