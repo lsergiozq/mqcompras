@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import { useAuth } from './AuthContext';
 import { usePlace } from './PlaceContext';
-import { History as HistoryIcon, Image as ImageIcon, Calendar, ChevronLeft } from 'lucide-react';
+import { History as HistoryIcon, Calendar, ChevronLeft, Trash2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 export default function History() {
@@ -10,25 +10,58 @@ export default function History() {
   const { currentPlaceId } = usePlace();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [clearing, setClearing] = useState(false);
 
   useEffect(() => {
-    if (user && currentPlaceId) loadHistory();
+    if (!user || !currentPlaceId) return;
+
+    let active = true;
+
+    const run = async () => {
+      const { data } = await supabase
+        .from('list_items')
+        .select(`
+          id, quantity, archived_at,
+          product:products(id, name, thumbnail_url)
+        `)
+        .eq('place_id', currentPlaceId)
+        .not('archived_at', 'is', null)
+        .order('archived_at', { ascending: false });
+
+      if (!active) return;
+      if (data) setItems(data);
+      setLoading(false);
+    };
+
+    run();
+
+    return () => {
+      active = false;
+    };
   }, [user, currentPlaceId]);
 
-  const loadHistory = async () => {
-    setLoading(true);
-    const { data } = await supabase
-      .from('list_items')
-      .select(`
-        id, quantity, archived_at,
-        product:products(id, name, thumbnail_url)
-      `)
-      .eq('place_id', currentPlaceId)
-      .not('archived_at', 'is', null)
-      .order('archived_at', { ascending: false });
+  const clearHistory = async () => {
+    if (!currentPlaceId || clearing || items.length === 0) return;
 
-    if (data) setItems(data);
-    setLoading(false);
+    const confirmed = window.confirm('Tem certeza que deseja limpar todo o histórico deste Local? Essa ação não apaga a lista atual nem o catálogo.');
+    if (!confirmed) return;
+
+    setClearing(true);
+    try {
+      const { error } = await supabase
+        .from('list_items')
+        .delete()
+        .eq('place_id', currentPlaceId)
+        .not('archived_at', 'is', null);
+
+      if (error) throw error;
+
+      setItems([]);
+    } catch (err) {
+      console.error(err);
+      alert('Não foi possível limpar o histórico agora. Tente novamente.');
+    }
+    setClearing(false);
   };
 
   // Agrupa por data (yyyy-mm-dd) usando o fuso local
@@ -69,7 +102,25 @@ export default function History() {
         <Link to="/settings" style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}>
           <ChevronLeft size={24} />
         </Link>
-        <h2 style={{ fontSize: '1.5rem' }}>Histórico</h2>
+        <h2 style={{ fontSize: '1.5rem', flex: 1 }}>Histórico</h2>
+        {!loading && items.length > 0 && (
+          <button
+            type="button"
+            onClick={clearHistory}
+            disabled={clearing}
+            className="btn"
+            style={{
+              padding: '10px 12px',
+              backgroundColor: '#FEE2E2',
+              color: 'var(--danger)',
+              gap: '6px',
+              opacity: clearing ? 0.7 : 1,
+            }}
+          >
+            <Trash2 size={16} />
+            {clearing ? 'Limpando...' : 'Limpar histórico'}
+          </button>
+        )}
       </div>
 
       {loading ? (
