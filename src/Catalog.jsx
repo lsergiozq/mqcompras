@@ -1,23 +1,23 @@
-import React, { useState, useEffect } from 'react';
+import { startTransition, useState, useEffect, useCallback } from 'react';
 import { supabase } from './supabase';
 import { useAuth } from './AuthContext';
 import { usePlace } from './PlaceContext';
-import { Plus, Search, Image as ImageIcon, ArrowUp, ArrowDown, Edit2, Trash2 } from 'lucide-react';
+import { Plus, Search, ArrowUp, ArrowDown, Edit2, Trash2 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
+import QuantityPickerModal from './QuantityPickerModal';
+import { buildProductInsights, getSortedProductMatches } from './productDiscovery';
 
 export default function Catalog() {
   const { user } = useAuth();
   const { currentPlaceId } = usePlace();
   const navigate = useNavigate();
   const [products, setProducts] = useState([]);
+  const [productInsights, setProductInsights] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
   const [toastMsg, setToastMsg] = useState('');
+  const [quantityDialog, setQuantityDialog] = useState({ open: false, product: null, initialQuantity: '1' });
 
-  useEffect(() => {
-    if (user && currentPlaceId) loadCatalog();
-  }, [user, currentPlaceId]);
-
-  const loadCatalog = async () => {
+  const loadCatalog = useCallback(async () => {
     const { data } = await supabase
       .from('products')
       .select('*, area:areas(name, order_index)')
@@ -25,10 +25,38 @@ export default function Catalog() {
       .order('order_index', { ascending: true })
       .order('name', { ascending: true });
 
-    if (data) setProducts(data);
-  };
+    if (!data) return;
 
-  const filteredProducts = products.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()));
+    startTransition(() => {
+      setProducts(data);
+    });
+
+    const productIds = data.map((product) => product.id);
+    if (productIds.length === 0) {
+      startTransition(() => {
+        setProductInsights({});
+      });
+      return;
+    }
+
+    const { data: usageRows } = await supabase
+      .from('list_items')
+      .select('product_id, added_at, archived_at')
+      .eq('place_id', currentPlaceId)
+      .in('product_id', productIds);
+
+    startTransition(() => {
+      setProductInsights(buildProductInsights(usageRows || []));
+    });
+  }, [currentPlaceId]);
+
+  useEffect(() => {
+    if (user && currentPlaceId) loadCatalog();
+  }, [user, currentPlaceId, loadCatalog]);
+
+  const filteredProducts = searchQuery
+    ? getSortedProductMatches(products, searchQuery, productInsights)
+    : products;
 
   const groupedProducts = filteredProducts.reduce((acc, p) => {
     const areaName = p.area?.name || 'Sem Corredor';
@@ -41,10 +69,16 @@ export default function Catalog() {
 
   const sortedAreas = Object.keys(groupedProducts).sort((a, b) => groupedProducts[a].order - groupedProducts[b].order);
 
-  const addToShoppingList = async (productId) => {
-    let qty = window.prompt('Quantidade?', '1');
-    if (qty === null) return;
-    if (qty.trim() === '') qty = '1';
+  const closeQuantityDialog = () => {
+    setQuantityDialog({ open: false, product: null, initialQuantity: '1' });
+  };
+
+  const openQuantityDialog = (product) => {
+    setQuantityDialog({ open: true, product, initialQuantity: '1' });
+  };
+
+  const addToShoppingList = async (productId, quantity) => {
+    const qty = quantity.trim() || '1';
 
     const { data: existingArray } = await supabase
       .from('list_items')
@@ -56,12 +90,7 @@ export default function Catalog() {
     const existing = existingArray && existingArray.length > 0 ? existingArray[0] : null;
 
     if (existing) {
-      if (!existing.is_purchased) {
-        alert('Este item já está na sua lista de compras! Se quiser alterar a quantidade, vá na aba "Lista" e toque no número.');
-        return;
-      } else {
-        await supabase.from('list_items').update({ is_purchased: false, quantity: qty }).eq('id', existing.id);
-      }
+      await supabase.from('list_items').update({ is_purchased: false, quantity: qty }).eq('id', existing.id);
     } else {
       await supabase.from('list_items').insert([{
         place_id: currentPlaceId,
@@ -70,8 +99,11 @@ export default function Catalog() {
         is_purchased: false
       }]);
     }
+
+    closeQuantityDialog();
     setToastMsg('✓ Adicionado à lista');
     setTimeout(() => setToastMsg(''), 2500);
+    loadCatalog();
   };
 
   const handleEditProduct = (product) => {
@@ -88,7 +120,9 @@ export default function Catalog() {
           const fileName = urlParts.pop();
           const folderName = urlParts.pop();
           await supabase.storage.from('thumbnails').remove([`${folderName}/${fileName}`]);
-        } catch(e) {}
+        } catch {
+          // Melhor esforço: se falhar ao limpar o Storage, segue apagando o produto.
+        }
       }
 
       await supabase.from('products').delete().eq('id', product.id);
@@ -219,7 +253,7 @@ export default function Catalog() {
                       </div>
                     )}
 
-                    <button onClick={() => addToShoppingList(p.id)} className="btn" style={{ padding: '8px', backgroundColor: 'var(--background)', color: 'var(--primary)' }}>
+                    <button onClick={() => openQuantityDialog(p)} className="btn" style={{ padding: '8px', backgroundColor: 'var(--background)', color: 'var(--primary)' }}>
                       <Plus size={20} />
                     </button>
                   </div>
@@ -242,6 +276,17 @@ export default function Catalog() {
           {toastMsg}
         </div>
       )}
+
+      <QuantityPickerModal
+        key={quantityDialog.product?.id || 'catalog-quantity'}
+        open={quantityDialog.open}
+        title="Quantidade"
+        itemName={quantityDialog.product?.name}
+        initialQuantity={quantityDialog.initialQuantity}
+        confirmLabel="Adicionar"
+        onCancel={closeQuantityDialog}
+        onConfirm={(quantity) => addToShoppingList(quantityDialog.product.id, quantity)}
+      />
     </div>
   );
 }

@@ -4,52 +4,8 @@ import { useAuth } from './AuthContext';
 import { usePlace } from './PlaceContext';
 import { Link } from 'react-router-dom';
 import { CheckCircle2, Circle, Plus, Search, ShoppingBag } from 'lucide-react';
-
-function buildPurchaseSummary(rows) {
-  const now = Date.now();
-  const thirtyDaysAgo = now - (30 * 24 * 60 * 60 * 1000);
-  const summaryByProductId = {};
-
-  rows.forEach((row) => {
-    if (!row.product_id || !row.archived_at) return;
-
-    const archivedTime = new Date(row.archived_at).getTime();
-    if (!summaryByProductId[row.product_id]) {
-      summaryByProductId[row.product_id] = {
-        lastArchivedAt: row.archived_at,
-        countLast30Days: 0,
-      };
-    }
-
-    if (archivedTime >= thirtyDaysAgo) {
-      summaryByProductId[row.product_id].countLast30Days += 1;
-    }
-  });
-
-  return summaryByProductId;
-}
-
-function formatLastPurchaseText(archivedAt) {
-  if (!archivedAt) return null;
-
-  const purchaseDate = new Date(archivedAt);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const purchaseDay = new Date(purchaseDate);
-  purchaseDay.setHours(0, 0, 0, 0);
-
-  const diffDays = Math.round((today.getTime() - purchaseDay.getTime()) / (24 * 60 * 60 * 1000));
-
-  if (diffDays <= 0) return 'Ultima compra hoje';
-  if (diffDays === 1) return 'Ultima compra ha 1 dia';
-  return `Ultima compra ha ${diffDays} dias`;
-}
-
-function formatPurchaseSummary(summary) {
-  if (!summary?.lastArchivedAt) return null;
-  return formatLastPurchaseText(summary.lastArchivedAt);
-}
+import QuantityPickerModal from './QuantityPickerModal';
+import { buildProductInsights, formatLastPurchaseText, getSortedProductMatches } from './productDiscovery';
 
 export default function ShoppingList() {
   const { user } = useAuth();
@@ -57,7 +13,9 @@ export default function ShoppingList() {
   const [items, setItems] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [allProducts, setAllProducts] = useState([]);
+  const [productInsights, setProductInsights] = useState({});
   const [showAutocomplete, setShowAutocomplete] = useState(false);
+  const [quantityDialog, setQuantityDialog] = useState({ open: false, mode: 'add', product: null, item: null, initialQuantity: '1' });
 
   useEffect(() => {
     if (!user || !currentPlaceId) return;
@@ -68,6 +26,7 @@ export default function ShoppingList() {
     const channel = supabase.channel(`list_updates_${currentPlaceId}_${Date.now()}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'list_items', filter: `place_id=eq.${currentPlaceId}` }, () => {
         fetchItems(currentPlaceId);
+        loadCatalog(currentPlaceId);
       })
       .subscribe();
 
@@ -76,7 +35,23 @@ export default function ShoppingList() {
 
   async function loadCatalog(pid) {
     const { data: products } = await supabase.from('products').select('*').eq('place_id', pid);
-    if (products) setAllProducts(products);
+    if (!products) return;
+
+    setAllProducts(products);
+
+    const productIds = products.map((product) => product.id);
+    if (productIds.length === 0) {
+      setProductInsights({});
+      return;
+    }
+
+    const { data: usageRows } = await supabase
+      .from('list_items')
+      .select('product_id, added_at, archived_at')
+      .eq('place_id', pid)
+      .in('product_id', productIds);
+
+    setProductInsights(buildProductInsights(usageRows || []));
   }
 
   async function fetchItems(pid) {
@@ -89,28 +64,7 @@ export default function ShoppingList() {
       .eq('place_id', pid)
       .is('archived_at', null);
 
-    if (!data) return;
-
-    const productIds = [...new Set(data.map(item => item.product?.id).filter(Boolean))];
-    if (productIds.length === 0) {
-      setItems(data);
-      return;
-    }
-
-    const { data: historyRows } = await supabase
-      .from('list_items')
-      .select('product_id, archived_at')
-      .eq('place_id', pid)
-      .in('product_id', productIds)
-      .not('archived_at', 'is', null)
-      .order('archived_at', { ascending: false });
-
-    const purchaseSummaryByProductId = buildPurchaseSummary(historyRows || []);
-
-    setItems(data.map(item => ({
-      ...item,
-      purchaseSummary: purchaseSummaryByProductId[item.product?.id] || null,
-    })));
+    if (data) setItems(data);
   }
 
   const togglePurchased = async (id, currentStatus) => {
@@ -118,24 +72,25 @@ export default function ShoppingList() {
     await supabase.from('list_items').update({ is_purchased: !currentStatus }).eq('id', id);
   };
 
-  const addExistingProduct = async (product) => {
+  const closeQuantityDialog = () => {
+    setQuantityDialog({ open: false, mode: 'add', product: null, item: null, initialQuantity: '1' });
+  };
+
+  const openAddQuantityDialog = (product) => {
     setSearchQuery('');
     setShowAutocomplete(false);
 
-    let qty = window.prompt('Quantidade?', '1');
-    if (qty === null) return;
-    if (qty.trim() === '') qty = '1';
+    setQuantityDialog({ open: true, mode: 'add', product, item: null, initialQuantity: '1' });
+  };
+
+  const handleAddExistingProduct = async (product, quantity) => {
+    const qty = quantity.trim() || '1';
 
     const { data: existingArray } = await supabase.from('list_items').select('*').eq('product_id', product.id).eq('place_id', currentPlaceId).is('archived_at', null).limit(1);
     const existing = existingArray && existingArray.length > 0 ? existingArray[0] : null;
 
     if (existing) {
-      if (!existing.is_purchased) {
-        alert('Este item já está na sua lista de compras! Você pode alterar a quantidade clicando no número abaixo do nome dele.');
-        return;
-      } else {
-        await supabase.from('list_items').update({ is_purchased: false, quantity: qty }).eq('id', existing.id);
-      }
+      await supabase.from('list_items').update({ is_purchased: false, quantity: qty }).eq('id', existing.id);
     } else {
       await supabase.from('list_items').insert([{
         place_id: currentPlaceId,
@@ -144,6 +99,25 @@ export default function ShoppingList() {
         is_purchased: false
       }]);
     }
+
+    closeQuantityDialog();
+    fetchItems(currentPlaceId);
+    loadCatalog(currentPlaceId);
+  };
+
+  const handleUpdateQuantity = async (item, quantity) => {
+    const nextQuantity = quantity.trim();
+    if (!nextQuantity) return;
+
+    await supabase.from('list_items').update({ quantity: nextQuantity }).eq('id', item.id);
+    closeQuantityDialog();
+    fetchItems(currentPlaceId);
+  };
+
+  const handleRemoveItem = async (item) => {
+    await supabase.from('list_items').delete().eq('id', item.id);
+    closeQuantityDialog();
+    fetchItems(currentPlaceId);
   };
 
   const finishShopping = async () => {
@@ -183,7 +157,7 @@ export default function ShoppingList() {
   });
 
   const sortedAreas = Object.keys(groupedItems).sort((a, b) => groupedItems[a].order - groupedItems[b].order);
-  const filteredCatalog = allProducts.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 5);
+  const filteredCatalog = getSortedProductMatches(allProducts, searchQuery, productInsights).slice(0, 5);
   const showCatalogDropdown = showAutocomplete && searchQuery.length > 0;
 
   const totalCount = items.length;
@@ -231,7 +205,7 @@ export default function ShoppingList() {
             {filteredCatalog.map(p => (
               <div
                 key={p.id}
-                onClick={() => addExistingProduct(p)}
+                onClick={() => openAddQuantityDialog(p)}
                 style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', borderBottom: '1px solid var(--border)' }}
               >
                 {/* [IMG-OFF] Miniatura desabilitada. Para reativar, restaurar bloco original.
@@ -243,7 +217,14 @@ export default function ShoppingList() {
                   </div>
                 )}
                 */}
-                <span>{p.name}</span>
+                <div>
+                  <div>{p.name}</div>
+                  {productInsights[p.id]?.lastPurchasedAt && (
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                      {formatLastPurchaseText(productInsights[p.id].lastPurchasedAt)}
+                    </div>
+                  )}
+                </div>
               </div>
             ))}
             {filteredCatalog.length === 0 && (
@@ -291,23 +272,16 @@ export default function ShoppingList() {
 
                       <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 600 }}>{item.product.name}</div>
-                        {item.purchaseSummary && (
+                        {productInsights[item.product.id]?.lastPurchasedAt && (
                           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                            {formatPurchaseSummary(item.purchaseSummary)}
+                            {formatLastPurchaseText(productInsights[item.product.id].lastPurchasedAt)}
                           </div>
                         )}
                         <div
                           style={{ fontSize: '0.875rem', color: 'var(--primary)', cursor: 'pointer', display: 'inline-block', padding: '2px 6px', backgroundColor: 'var(--background)', borderRadius: '4px', marginTop: '4px', fontWeight: 500 }}
                           onClick={(e) => {
                             e.stopPropagation();
-                            const newQty = window.prompt('Nova quantidade (Digite 0 para remover):', item.quantity);
-                            if (newQty !== null && newQty.trim() !== '') {
-                              if (newQty.trim() === '0') {
-                                supabase.from('list_items').delete().eq('id', item.id).then(() => fetchItems(currentPlaceId));
-                              } else {
-                                supabase.from('list_items').update({ quantity: newQty.trim() }).eq('id', item.id).then(() => fetchItems(currentPlaceId));
-                              }
-                            }
+                            setQuantityDialog({ open: true, mode: 'edit', product: item.product, item, initialQuantity: item.quantity || '1' });
                           }}
                         >
                           Qtd: {item.quantity}
@@ -362,6 +336,26 @@ export default function ShoppingList() {
           </button>
         </div>
       )}
+
+      <QuantityPickerModal
+        key={`${quantityDialog.mode}-${quantityDialog.item?.id || quantityDialog.product?.id || 'shopping-quantity'}-${quantityDialog.initialQuantity}`}
+        open={quantityDialog.open}
+        title={quantityDialog.mode === 'edit' ? 'Alterar quantidade' : 'Quantidade'}
+        itemName={quantityDialog.product?.name}
+        initialQuantity={quantityDialog.initialQuantity}
+        confirmLabel={quantityDialog.mode === 'edit' ? 'Salvar' : 'Adicionar'}
+        allowRemove={quantityDialog.mode === 'edit'}
+        onCancel={closeQuantityDialog}
+        onRemove={() => handleRemoveItem(quantityDialog.item)}
+        onConfirm={(quantity) => {
+          if (quantityDialog.mode === 'edit') {
+            handleUpdateQuantity(quantityDialog.item, quantity);
+            return;
+          }
+
+          handleAddExistingProduct(quantityDialog.product, quantity);
+        }}
+      />
     </div>
   );
 }
