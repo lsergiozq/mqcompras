@@ -81,7 +81,8 @@ function App() {
       <div className="app-container">
         <header className="app-header">
           <h1 style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1.25rem', color: 'var(--primary)', fontWeight: 700 }}>
-            🛒 Comprou?
+            <img src="/pwa-icon.svg" alt="" width={32} height={32} style={{ borderRadius: '8px', display: 'block' }} />
+            Comprou?
           </h1>
           {user && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
