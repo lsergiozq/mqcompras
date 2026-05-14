@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from './supabase';
 import { useAuth } from './AuthContext';
 import { usePlace } from './PlaceContext';
+import { fetchActiveCatalogPresets, applyCatalogPreset } from './catalogPresets';
 import { Home, Users, Plus, ArrowRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -15,7 +16,28 @@ export default function Welcome() {
   const [mode, setMode] = useState(null); // null | 'create' | 'join'
   const [placeName, setPlaceName] = useState('Casa');
   const [inviteCode, setInviteCode] = useState('');
+  const [presets, setPresets] = useState([]);
+  const [startOption, setStartOption] = useState('empty');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadPresets = async () => {
+      try {
+        const rows = await fetchActiveCatalogPresets();
+        if (active) setPresets(rows);
+      } catch (err) {
+        console.error(err);
+      }
+    };
+
+    loadPresets();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -34,12 +56,16 @@ export default function Welcome() {
         .insert([{ user_id: user.id, place_id: newPlace.id }]);
       if (e2) throw e2;
 
-      const areasToInsert = DEFAULT_AREAS.map((name, i) => ({
-        place_id: newPlace.id,
-        name,
-        order_index: i,
-      }));
-      await supabase.from('areas').insert(areasToInsert);
+      if (startOption === 'empty') {
+        const areasToInsert = DEFAULT_AREAS.map((name, i) => ({
+          place_id: newPlace.id,
+          name,
+          order_index: i,
+        }));
+        await supabase.from('areas').insert(areasToInsert);
+      } else {
+        await applyCatalogPreset(newPlace.id, startOption);
+      }
 
       window.localStorage.setItem('currentPlaceId', newPlace.id);
       await refreshPlaces();
@@ -161,6 +187,63 @@ export default function Welcome() {
               autoFocus
               required
             />
+          </div>
+
+          <div className="card" style={{ marginBottom: 0 }}>
+            <label style={{ display: 'block', marginBottom: '12px', fontWeight: 500 }}>Como você quer começar?</label>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <label
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '12px', padding: '12px',
+                  border: `2px solid ${startOption === 'empty' ? 'var(--primary)' : 'var(--border)'}`,
+                  borderRadius: 'var(--radius-lg)', cursor: 'pointer',
+                  background: startOption === 'empty' ? 'rgba(79, 70, 229, 0.04)' : 'transparent',
+                }}
+              >
+                <input
+                  type="radio"
+                  name="startOption"
+                  value="empty"
+                  checked={startOption === 'empty'}
+                  onChange={() => setStartOption('empty')}
+                />
+                <Plus color="var(--primary)" size={20} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600 }}>Começar vazio</div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                    Cria só os corredores padrão. Você cadastra os produtos depois.
+                  </div>
+                </div>
+              </label>
+
+              {presets.map((preset) => (
+                <label
+                  key={preset.id}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '12px', padding: '12px',
+                    border: `2px solid ${startOption === preset.slug ? 'var(--primary)' : 'var(--border)'}`,
+                    borderRadius: 'var(--radius-lg)', cursor: 'pointer',
+                    background: startOption === preset.slug ? 'rgba(79, 70, 229, 0.04)' : 'transparent',
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="startOption"
+                    value={preset.slug}
+                    checked={startOption === preset.slug}
+                    onChange={() => setStartOption(preset.slug)}
+                  />
+                  <Home color="var(--primary)" size={20} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600 }}>{preset.name}</div>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                      {preset.description || 'Começa com um catálogo mínimo pronto.'}
+                    </div>
+                  </div>
+                </label>
+              ))}
+            </div>
           </div>
 
           <div style={{ display: 'flex', gap: '8px' }}>

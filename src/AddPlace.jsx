@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from './supabase';
 import { useAuth } from './AuthContext';
 import { usePlace } from './PlaceContext';
+import { fetchActiveCatalogPresets, applyCatalogPreset } from './catalogPresets';
 import { ArrowLeft, Sparkles, Copy } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -13,9 +14,29 @@ export default function AddPlace() {
   const navigate = useNavigate();
 
   const [name, setName] = useState('');
-  const [mode, setMode] = useState('empty');     // 'empty' | 'copy'
+  const [presets, setPresets] = useState([]);
+  const [mode, setMode] = useState('empty');     // 'empty' | 'copy' | preset slug
   const [sourcePlaceId, setSourcePlaceId] = useState(places[0]?.id || '');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadPresets = async () => {
+      try {
+        const rows = await fetchActiveCatalogPresets();
+        if (active) setPresets(rows);
+      } catch (err) {
+        console.error(err);
+      }
+    };
+
+    loadPresets();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -45,6 +66,10 @@ export default function AddPlace() {
         await supabase.from('areas').insert(areasToInsert);
       }
 
+      if (mode !== 'empty' && mode !== 'copy') {
+        await applyCatalogPreset(newPlace.id, mode);
+      }
+
       // 4) Modo "copiar": copia áreas e produtos do Local origem (sem lista_items)
       if (mode === 'copy' && sourcePlaceId) {
         // Áreas
@@ -68,7 +93,7 @@ export default function AddPlace() {
 
           // Mapeia old.id -> new.id (pela ordem)
           if (insertedAreas) {
-            insertedAreas.forEach((newA, i) => {
+            insertedAreas.forEach((newA) => {
               const oldA = srcAreas.find(o => o.name === newA.name && o.order_index === newA.order_index);
               if (oldA) areaIdMap[oldA.id] = newA.id;
             });
@@ -154,6 +179,33 @@ export default function AddPlace() {
                 </div>
               </div>
             </label>
+
+            {presets.map((preset) => (
+              <label
+                key={preset.id}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '12px', padding: '12px',
+                  border: `2px solid ${mode === preset.slug ? 'var(--primary)' : 'var(--border)'}`,
+                  borderRadius: 'var(--radius-lg)', cursor: 'pointer',
+                  background: mode === preset.slug ? 'rgba(79, 70, 229, 0.04)' : 'transparent',
+                }}
+              >
+                <input
+                  type="radio"
+                  name="mode"
+                  value={preset.slug}
+                  checked={mode === preset.slug}
+                  onChange={() => setMode(preset.slug)}
+                />
+                <Sparkles color="var(--primary)" size={20} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600 }}>{preset.name}</div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                    {preset.description || 'Começa com um catálogo mínimo pronto.'}
+                  </div>
+                </div>
+              </label>
+            ))}
 
             {places.length > 0 && (
               <label
