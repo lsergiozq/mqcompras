@@ -3,9 +3,11 @@ import { supabase } from './supabase';
 import { useAuth } from './AuthContext';
 import { usePlace } from './PlaceContext';
 import { Link } from 'react-router-dom';
-import { CheckCircle2, Circle, Plus, Search, ShoppingBag } from 'lucide-react';
+import { CheckCircle2, Circle, Plus, Search, ShoppingBag, Mic, MicOff } from 'lucide-react';
 import QuantityPickerModal from './QuantityPickerModal';
 import { buildProductInsights, formatLastPurchaseText, getSortedProductMatches } from './productDiscovery';
+import useSpeechRecognition, { splitVoiceTranscript } from './useSpeechRecognition';
+import VoiceResultModal from './VoiceResultModal';
 
 export default function ShoppingList() {
   const { user } = useAuth();
@@ -16,6 +18,10 @@ export default function ShoppingList() {
   const [productInsights, setProductInsights] = useState({});
   const [showAutocomplete, setShowAutocomplete] = useState(false);
   const [quantityDialog, setQuantityDialog] = useState({ open: false, mode: 'add', product: null, item: null, initialQuantity: '1' });
+
+  // === Entrada por voz ===
+  const { supported: voiceSupported, listening, transcript, error: voiceError, start: startVoice, stop: stopVoice, reset: resetVoice } = useSpeechRecognition({ lang: 'pt-BR' });
+  const [voiceModal, setVoiceModal] = useState({ open: false, transcript: '', matched: [], unmatched: [] });
 
   useEffect(() => {
     if (!user || !currentPlaceId) return;
@@ -66,6 +72,98 @@ export default function ShoppingList() {
 
     if (data) setItems(data);
   }
+
+  // Quando o usuário para de falar (listening: true -> false) e há transcrição, processa.
+  useEffect(() => {
+    if (listening) return;       // ainda gravando
+    if (!transcript) return;     // não falou nada
+    if (allProducts.length === 0) return;
+
+    const phrases = splitVoiceTranscript(transcript);
+    const matched = [];
+    const unmatched = [];
+    const usedIds = new Set();
+
+    for (const phrase of phrases) {
+      // Aproveita o mesmo matching usado no autocomplete (fuzzy + prioridade por uso)
+      const candidates = getSortedProductMatches(allProducts, phrase, productInsights);
+      const best = candidates.find(p => !usedIds.has(p.id));
+      if (best) {
+        usedIds.add(best.id);
+        matched.push({ phrase, product: best });
+      } else {
+        unmatched.push(phrase);
+      }
+    }
+
+    setVoiceModal({ open: true, transcript, matched, unmatched });
+    resetVoice();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listening, transcript]);
+
+  // Tratar erro do microfone (permissão negada, sem internet, etc.)
+  useEffect(() => {
+    if (!voiceError) return;
+    const errorMessages = {
+      'not-allowed': 'Você precisa permitir o uso do microfone no navegador.',
+      'no-speech': 'Não ouvi nada. Tente de novo.',
+      'audio-capture': 'Não consegui acessar o microfone.',
+      'network': 'Sem internet para o reconhecimento de voz.',
+    };
+    alert(errorMessages[voiceError] || 'Erro no reconhecimento de voz. Tente novamente.');
+    resetVoice();
+  }, [voiceError, resetVoice]);
+
+  const handleVoiceClick = () => {
+    if (listening) {
+      stopVoice();
+    } else {
+      startVoice();
+    }
+  };
+
+  const closeVoiceModal = () => setVoiceModal({ open: false, transcript: '', matched: [], unmatched: [] });
+
+  const handleVoiceConfirm = async (products) => {
+    if (!products || products.length === 0) {
+      closeVoiceModal();
+      return;
+    }
+
+    // Para cada produto, se já existe um item ativo, reativa; senão insere.
+    const productIds = products.map(p => p.id);
+    const { data: existing } = await supabase
+      .from('list_items')
+      .select('id, product_id, is_purchased')
+      .eq('place_id', currentPlaceId)
+      .in('product_id', productIds)
+      .is('archived_at', null);
+
+    const existingByProduct = new Map((existing || []).map(e => [e.product_id, e]));
+    const toInsert = [];
+    const toReactivate = [];
+
+    for (const p of products) {
+      const e = existingByProduct.get(p.id);
+      if (e) {
+        if (e.is_purchased) toReactivate.push(e.id);
+      } else {
+        toInsert.push({
+          place_id: currentPlaceId,
+          product_id: p.id,
+          quantity: '1',
+          is_purchased: false,
+        });
+      }
+    }
+
+    if (toInsert.length > 0)    await supabase.from('list_items').insert(toInsert);
+    if (toReactivate.length > 0) await supabase.from('list_items').update({ is_purchased: false, quantity: '1' }).in('id', toReactivate);
+
+    closeVoiceModal();
+    fetchItems(currentPlaceId);
+    loadCatalog(currentPlaceId);
+  };
 
   const togglePurchased = async (id, currentStatus) => {
     setItems(items.map(item => item.id === id ? { ...item, is_purchased: !currentStatus } : item));
@@ -156,7 +254,15 @@ export default function ShoppingList() {
     });
   });
 
-  const sortedAreas = Object.keys(groupedItems).sort((a, b) => groupedItems[a].order - groupedItems[b].order);
+  // Corredores 100% comprados (todos os itens já riscados, sem nenhum item pendente) vão pro fim da lista.
+  const sortedAreas = Object.keys(groupedItems).sort((a, b) => {
+    const ga = groupedItems[a];
+    const gb = groupedItems[b];
+    const aDone = ga.items.length === 0 && ga.purchased.length > 0;
+    const bDone = gb.items.length === 0 && gb.purchased.length > 0;
+    if (aDone !== bDone) return aDone ? 1 : -1; // o que não está done vem primeiro
+    return ga.order - gb.order;
+  });
   const filteredCatalog = getSortedProductMatches(allProducts, searchQuery, productInsights).slice(0, 5);
   const showCatalogDropdown = showAutocomplete && searchQuery.length > 0;
 
@@ -188,12 +294,31 @@ export default function ShoppingList() {
             <Search size={20} style={{ position: 'absolute', left: '12px', top: '12px', color: 'var(--text-muted)' }} />
             <input
               className="input-field"
-              placeholder="O que está faltando?"
-              style={{ paddingLeft: '40px' }}
+              placeholder={listening ? 'Ouvindo... fale os itens' : 'O que está faltando?'}
+              style={{ paddingLeft: '40px', paddingRight: voiceSupported ? '44px' : '14px' }}
               value={searchQuery}
               onChange={e => { setSearchQuery(e.target.value); setShowAutocomplete(true); }}
               onFocus={() => setShowAutocomplete(true)}
             />
+            {voiceSupported && (
+              <button
+                type="button"
+                onClick={handleVoiceClick}
+                aria-label={listening ? 'Parar gravação' : 'Falar itens da lista'}
+                title={listening ? 'Parar gravação' : 'Falar itens (ex: "leite, pão, sabão")'}
+                style={{
+                  position: 'absolute', right: '6px', top: '6px',
+                  width: '34px', height: '34px',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: listening ? 'var(--danger)' : 'var(--background)',
+                  border: 'none', borderRadius: '50%', cursor: 'pointer',
+                  transition: 'background 0.2s',
+                  animation: listening ? 'pulse 1.2s ease-in-out infinite' : 'none',
+                }}
+              >
+                {listening ? <MicOff size={18} color="white" /> : <Mic size={18} color="var(--primary)" />}
+              </button>
+            )}
           </div>
           <Link to="/add" className="btn btn-primary" style={{ padding: '0 16px' }}>
             <Plus />
@@ -248,10 +373,21 @@ export default function ShoppingList() {
             const group = groupedItems[areaName];
             if (group.items.length === 0 && group.purchased.length === 0) return null;
 
+            const areaDone = group.items.length === 0 && group.purchased.length > 0;
+
             return (
-              <div key={areaName}>
-                <h3 style={{ fontSize: '1.125rem', marginBottom: '12px', color: 'var(--primary)' }}>
+              <div key={areaName} style={{ opacity: areaDone ? 0.7 : 1, transition: 'opacity 0.2s' }}>
+                <h3 style={{
+                  fontSize: '1.125rem',
+                  marginBottom: '12px',
+                  color: areaDone ? 'var(--secondary)' : 'var(--primary)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  transition: 'color 0.2s',
+                }}>
                   {areaName}
+                  {areaDone && <CheckCircle2 size={18} color="var(--secondary)" />}
                 </h3>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -336,6 +472,15 @@ export default function ShoppingList() {
           </button>
         </div>
       )}
+
+      <VoiceResultModal
+        open={voiceModal.open}
+        transcript={voiceModal.transcript}
+        matched={voiceModal.matched}
+        unmatched={voiceModal.unmatched}
+        onCancel={closeVoiceModal}
+        onConfirm={handleVoiceConfirm}
+      />
 
       <QuantityPickerModal
         key={`${quantityDialog.mode}-${quantityDialog.item?.id || quantityDialog.product?.id || 'shopping-quantity'}-${quantityDialog.initialQuantity}`}

@@ -1,5 +1,5 @@
 :root {
-  /* Colors */
+  /* Colors (tema claro padrão) */
   --primary: #4F46E5;
   --primary-hover: #4338CA;
   --secondary: #10B981;
@@ -9,6 +9,7 @@
   --text-muted: #6B7280;
   --border: #E5E7EB;
   --danger: #EF4444;
+  color-scheme: light;
 
   /* Spacing */
   --spacing-1: 0.25rem;
@@ -28,6 +29,26 @@
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+}
+
+/* Tema escuro automático — segue a preferência do sistema operacional */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --primary: #818CF8;          /* indigo-400, mais claro pra contraste no escuro */
+    --primary-hover: #6366F1;
+    --secondary: #34D399;        /* emerald-400 */
+    --background: #0F172A;       /* slate-900 — fundo do app */
+    --surface: #1E293B;          /* slate-800 — cards */
+    --text-main: #F1F5F9;        /* slate-100 */
+    --text-muted: #94A3B8;       /* slate-400 */
+    --border: #334155;           /* slate-700 */
+    --danger: #F87171;           /* red-400 */
+    color-scheme: dark;
+
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.4);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.5), 0 2px 4px -2px rgb(0 0 0 / 0.4);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.6), 0 4px 6px -4px rgb(0 0 0 / 0.4);
+  }
 }
 
 * {
@@ -170,6 +191,11 @@ body {
   100% { opacity: 0; transform: translate(-50%, -20px); }
 }
 
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
+  50%      { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+}
+
 /* Barra de Progresso da Lista */
 .progress-bar-wrapper {
   width: 100%;
@@ -182,7 +208,7 @@ body {
 
 .progress-bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--secondary), #34D399);
+  background: var(--secondary);
   border-radius: var(--radius-full);
   transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
 }
