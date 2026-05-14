@@ -15,6 +15,7 @@ import Welcome from './Welcome';
 import Places from './Places';
 import AddPlace from './AddPlace';
 import ImportFromPlace from './ImportFromPlace';
+import Join from './Join';
 import PWAInstallPrompt from './PWAInstallPrompt';
 import PlaceSwitcher from './PlaceSwitcher';
 
@@ -107,6 +108,8 @@ function App() {
             <Route path="/places" element={<PrivateRoute><Places /></PrivateRoute>} />
             <Route path="/places/new" element={<PrivateRoute><AddPlace /></PrivateRoute>} />
             <Route path="/import-products" element={<PrivateRoute><ImportFromPlace /></PrivateRoute>} />
+            {/* /join/:token é pública — Join.jsx faz o gate (manda pro login se não autenticado) */}
+            <Route path="/join/:token" element={<Join />} />
           </Routes>
         </main>
 

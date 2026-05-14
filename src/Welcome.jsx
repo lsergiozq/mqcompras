@@ -53,26 +53,29 @@ export default function Welcome() {
 
   const handleJoin = async (e) => {
     e.preventDefault();
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!uuidRegex.test(inviteCode.trim())) {
-      alert('Código inválido. Verifique se copiou e colou inteiro sem espaços a mais.');
-      return;
-    }
+    const raw = inviteCode.trim();
+    if (!raw) return;
+
+    // Aceita link completo .../join/<token> ou token solto
+    let token = raw;
+    const match = raw.match(/\/join\/([^/?#\s]+)/i);
+    if (match) token = match[1];
+
     setLoading(true);
     try {
-      const { data: place } = await supabase.from('places').select('id').eq('id', inviteCode.trim()).single();
-      if (!place) {
-        alert('Local não encontrado com esse código.');
-        setLoading(false);
-        return;
+      const { data, error } = await supabase.rpc('redeem_place_invite', { invite_token: token });
+      if (error) {
+        const msg = (error.message || '').toUpperCase();
+        if (msg.includes('NOT_FOUND'))  { alert('Convite inválido. Verifique o link.'); setLoading(false); return; }
+        if (msg.includes('EXPIRED'))    { alert('Este link expirou. Peça um novo.'); setLoading(false); return; }
+        if (msg.includes('EXHAUSTED'))  { alert('Este link já foi usado o número máximo de vezes. Peça um novo.'); setLoading(false); return; }
+        throw error;
       }
-      const { error } = await supabase.from('user_places').insert([{
-        user_id: user.id,
-        place_id: inviteCode.trim()
-      }]);
-      if (error && error.code !== '23505') throw error;
 
-      window.localStorage.setItem('currentPlaceId', inviteCode.trim());
+      const row = Array.isArray(data) ? data[0] : data;
+      if (row?.place_id) {
+        window.localStorage.setItem('currentPlaceId', row.place_id);
+      }
       await refreshPlaces();
       navigate('/', { replace: true });
     } catch (err) {
@@ -188,16 +191,19 @@ export default function Welcome() {
 
         <form onSubmit={handleJoin} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <div className="card" style={{ marginBottom: 0 }}>
-            <label style={{ display: 'block', marginBottom: '8px', fontWeight: 500 }}>Código do Local</label>
+            <label style={{ display: 'block', marginBottom: '8px', fontWeight: 500 }}>Link de convite</label>
             <input
               className="input-field"
               value={inviteCode}
               onChange={e => setInviteCode(e.target.value)}
-              placeholder="00000000-0000-0000-0000-000000000000"
+              placeholder="Cole o link aqui"
               autoFocus
               required
-              style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}
+              style={{ fontSize: '0.9rem' }}
             />
+            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '8px' }}>
+              Pode colar o link inteiro que vem no WhatsApp — o app entende.
+            </p>
           </div>
 
           <div style={{ display: 'flex', gap: '8px' }}>

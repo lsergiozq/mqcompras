@@ -5,90 +5,135 @@ import { usePlace } from './PlaceContext';
 import { Copy, Users, ListTree, History as HistoryIcon, Home, Download, Share2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
+// Gera token curto e legível (sem ambiguidade 0/O, 1/l/I) — 12 chars ≈ 70 bits
+function generateInviteToken(len = 12) {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789abcdefghijkmnpqrstuvwxyz';
+  const arr = new Uint32Array(len);
+  crypto.getRandomValues(arr);
+  let out = '';
+  for (let i = 0; i < len; i++) out += alphabet[arr[i] % alphabet.length];
+  return out;
+}
+
 export default function SettingsPage() {
   const { user } = useAuth();
   const { currentPlace, currentPlaceId, places, refreshPlaces } = usePlace();
   const [inviteCode, setInviteCode] = useState('');
   const [loading, setLoading] = useState(false);
+  const [sharing, setSharing] = useState(false);
 
-  const buildShareMessage = () => {
+  // Gera um link de convite NOVO (válido 48h ou 5 usos) e devolve a URL completa
+  const createInviteLink = async () => {
+    if (!currentPlaceId) return null;
+    const token = generateInviteToken();
+    const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
+
+    const { error } = await supabase.from('place_invites').insert([{
+      token,
+      place_id: currentPlaceId,
+      created_by: user.id,
+      expires_at: expiresAt,
+      max_uses: 5,
+      uses: 0,
+    }]);
+
+    if (error) {
+      console.error(error);
+      alert('Não foi possível gerar o link de convite. Tente novamente.');
+      return null;
+    }
+
+    return `${window.location.origin}/join/${token}`;
+  };
+
+  const buildShareMessage = (inviteUrl) => {
     const placeName = currentPlace?.name || 'meu Local';
     return (
 `🛒 Bora compartilhar nossa lista de compras no app *Comprou?*
 
 Estou te convidando para o Local "${placeName}". A gente vai dividir a mesma lista, catálogo de produtos e corredores do mercado — tudo em tempo real.
 
-Como entrar:
-1️⃣ Abra (ou instale) o app: ${window.location.origin}
-2️⃣ Entre com sua conta Google.
-3️⃣ Na tela de boas-vindas, escolha *"Entrar com código compartilhado do Local"* e cole o código abaixo. (Se você já usa o app, vá em Ajustes → "Recebeu um código?".)
+É só clicar no link abaixo, fazer login com Google e pronto, você já entra direto:
 
-Código do Local:
-${currentPlaceId}`
+${inviteUrl}
+
+(O link vale por 48 horas.)`
     );
   };
 
   const copyToClipboard = async () => {
-    if (!currentPlaceId) return;
+    if (!currentPlaceId || sharing) return;
+    setSharing(true);
     try {
-      await navigator.clipboard.writeText(currentPlaceId);
-      alert('Código copiado!');
+      const url = await createInviteLink();
+      if (!url) return;
+      await navigator.clipboard.writeText(url);
+      alert('Link copiado! Vale por 48 horas.');
     } catch {
-      alert('Não foi possível copiar automaticamente. Selecione o código e copie manualmente.');
+      alert('Não foi possível copiar automaticamente.');
+    } finally {
+      setSharing(false);
     }
   };
 
   const shareInvite = async () => {
-    if (!currentPlaceId) return;
-    const message = buildShareMessage();
+    if (!currentPlaceId || sharing) return;
+    setSharing(true);
+    try {
+      const url = await createInviteLink();
+      if (!url) return;
+      const message = buildShareMessage(url);
 
-    // 1) Tenta a Web Share API (Android/iOS modernos abrem o seletor nativo, incluindo WhatsApp)
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: 'Convite — Comprou?',
-          text: message,
-        });
-        return;
-      } catch (err) {
-        // Usuário cancelou — não cai pro fallback
-        if (err && err.name === 'AbortError') return;
+      // 1) Web Share API (celular abre seletor nativo)
+      if (navigator.share) {
+        try {
+          await navigator.share({
+            title: 'Convite — Comprou?',
+            text: message,
+            url, // alguns apps usam isso como link preview
+          });
+          return;
+        } catch (err) {
+          if (err && err.name === 'AbortError') return;
+        }
       }
-    }
 
-    // 2) Fallback: abre o WhatsApp diretamente em nova aba (funciona desktop e mobile)
-    const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
-    window.open(url, '_blank', 'noopener,noreferrer');
+      // 2) Fallback: WhatsApp Web/app via wa.me
+      const waUrl = `https://wa.me/?text=${encodeURIComponent(message)}`;
+      window.open(waUrl, '_blank', 'noopener,noreferrer');
+    } finally {
+      setSharing(false);
+    }
   };
 
   const handleJoinPlace = async (e) => {
     e.preventDefault();
-    if (!inviteCode.trim()) return;
+    const raw = inviteCode.trim();
+    if (!raw) return;
 
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!uuidRegex.test(inviteCode.trim())) {
-      alert('Código inválido. Verifique se copiou e colou inteiro sem espaços a mais.');
-      return;
-    }
+    // Aceita: 1) link completo .../join/<token>  2) token solto
+    let token = raw;
+    const match = raw.match(/\/join\/([^/?#\s]+)/i);
+    if (match) token = match[1];
 
     setLoading(true);
     try {
-      const { data: place } = await supabase.from('places').select('id').eq('id', inviteCode.trim()).single();
-      if (!place) {
-        alert('Local não encontrado com esse código.');
-        setLoading(false);
-        return;
+      const { data, error } = await supabase.rpc('redeem_place_invite', { invite_token: token });
+
+      if (error) {
+        const msg = (error.message || '').toUpperCase();
+        if (msg.includes('NOT_FOUND'))    { alert('Convite inválido. Verifique o link.'); setLoading(false); return; }
+        if (msg.includes('EXPIRED'))      { alert('Este link de convite expirou. Peça um novo.'); setLoading(false); return; }
+        if (msg.includes('EXHAUSTED'))    { alert('Este link já foi usado o número máximo de vezes. Peça um novo.'); setLoading(false); return; }
+        throw error;
       }
 
-      const { error } = await supabase.from('user_places').insert([{
-        user_id: user.id,
-        place_id: inviteCode.trim()
-      }]);
-
-      if (error && error.code !== '23505') throw error; // 23505 = unique violation (já é membro)
-
-      alert('Sincronizado com sucesso! Agora vocês dividem este Local.');
+      const row = Array.isArray(data) ? data[0] : data;
+      alert(`Pronto! Você entrou no Local "${row?.place_name || ''}".`);
       await refreshPlaces();
+      if (row?.place_id) {
+        window.localStorage.setItem('currentPlaceId', row.place_id);
+      }
       window.location.href = '/';
     } catch (err) {
       console.error(err);
@@ -177,50 +222,48 @@ ${currentPlaceId}`
 
           <div className="card">
             <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '12px' }}>
-              Convide alguém para dividir este Local com você. O app abre o WhatsApp já com a mensagem pronta — basta escolher o contato.
+              Gere um link e mande pelo WhatsApp. A pessoa clica, faz login com Google e entra direto neste Local. Cada link vale por <b>48 horas</b> ou até <b>5 entradas</b>.
             </p>
 
             <button
               onClick={shareInvite}
+              disabled={sharing}
               className="btn btn-primary"
-              style={{ width: '100%', padding: '14px', backgroundColor: '#25D366', gap: '8px' }}
+              style={{ width: '100%', padding: '14px', backgroundColor: '#25D366', gap: '8px', opacity: sharing ? 0.7 : 1 }}
             >
               <Share2 size={20} />
-              Compartilhar convite no WhatsApp
+              {sharing ? 'Gerando link...' : 'Compartilhar convite no WhatsApp'}
             </button>
 
-            <details style={{ marginTop: '12px' }}>
-              <summary style={{ cursor: 'pointer', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                Prefiro copiar o código manualmente
-              </summary>
-              <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
-                <input
-                  className="input-field"
-                  value={currentPlaceId || ''}
-                  readOnly
-                  style={{ backgroundColor: 'var(--background)', color: 'var(--text-muted)', fontSize: '0.7rem', fontFamily: 'monospace' }}
-                />
-                <button onClick={copyToClipboard} className="btn" style={{ padding: '0 16px', backgroundColor: 'var(--background)', color: 'var(--primary)' }}>
-                  <Copy size={20} />
-                </button>
-              </div>
-            </details>
+            <button
+              onClick={copyToClipboard}
+              disabled={sharing}
+              className="btn"
+              style={{
+                width: '100%', padding: '12px', marginTop: '8px',
+                backgroundColor: 'var(--background)', color: 'var(--primary)', gap: '8px',
+                opacity: sharing ? 0.7 : 1
+              }}
+            >
+              <Copy size={18} />
+              {sharing ? 'Gerando...' : 'Só copiar o link'}
+            </button>
           </div>
 
           <div className="card" style={{ marginBottom: 0 }}>
             <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '12px' }}>
-              Recebeu um código? Cole aqui para entrar com código compartilhado do Local:
+              Recebeu um link de convite e prefere colar manualmente? Cole o link (ou só o código dele) aqui:
             </p>
             <form onSubmit={handleJoinPlace} style={{ display: 'flex', gap: '8px', flexDirection: 'column' }}>
               <input
                 className="input-field"
-                placeholder="Cole o código grande aqui"
+                placeholder="Cole o link aqui"
                 value={inviteCode}
                 onChange={e => setInviteCode(e.target.value)}
                 required
               />
               <button type="submit" className="btn btn-primary" disabled={loading}>
-                {loading ? 'Sincronizando...' : 'Entrar no Local'}
+                {loading ? 'Entrando...' : 'Entrar no Local'}
               </button>
             </form>
           </div>
