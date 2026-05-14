@@ -1,39 +1,29 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import { useAuth } from './AuthContext';
+import { usePlace } from './PlaceContext';
 import { History as HistoryIcon, Image as ImageIcon, Calendar, ChevronLeft } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 export default function History() {
   const { user } = useAuth();
+  const { currentPlaceId } = usePlace();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (user) loadHistory();
-  }, [user]);
+    if (user && currentPlaceId) loadHistory();
+  }, [user, currentPlaceId]);
 
   const loadHistory = async () => {
     setLoading(true);
-    const { data: userFamilies } = await supabase
-      .from('user_families')
-      .select('family_id')
-      .eq('user_id', user.id);
-
-    if (!userFamilies || userFamilies.length === 0) {
-      setItems([]);
-      setLoading(false);
-      return;
-    }
-
-    const fid = userFamilies[0].family_id;
     const { data } = await supabase
       .from('list_items')
       .select(`
         id, quantity, archived_at,
         product:products(id, name, thumbnail_url)
       `)
-      .eq('family_id', fid)
+      .eq('place_id', currentPlaceId)
       .not('archived_at', 'is', null)
       .order('archived_at', { ascending: false });
 

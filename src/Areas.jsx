@@ -1,47 +1,39 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import { useAuth } from './AuthContext';
+import { usePlace } from './PlaceContext';
 import { ArrowLeft, ArrowUp, ArrowDown, Plus, Trash2, Edit2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 export default function Areas() {
   const { user } = useAuth();
+  const { currentPlaceId } = usePlace();
   const [areas, setAreas] = useState([]);
   const [newArea, setNewArea] = useState('');
-  const [familyId, setFamilyId] = useState(null);
 
   useEffect(() => {
-    if (user) {
-      loadFamilyAndAreas();
-    }
-  }, [user]);
+    if (user && currentPlaceId) loadAreas();
+  }, [user, currentPlaceId]);
 
-  const loadFamilyAndAreas = async () => {
-    let { data: userFamilies } = await supabase.from('user_families').select('family_id').eq('user_id', user.id);
-    let fid = null;
-    if (!userFamilies || userFamilies.length === 0) {
-      const { data: newFamily } = await supabase.from('families').insert([{ name: 'Minha Família' }]).select().single();
-      fid = newFamily.id;
-      await supabase.from('user_families').insert([{ user_id: user.id, family_id: fid }]);
-
-      const defaultAreas = ['Hortifruti', 'Padaria', 'Frios', 'Açougue', 'Limpeza', 'Mercearia'];
-      const areasToInsert = defaultAreas.map((name, index) => ({ family_id: fid, name, order_index: index }));
-      await supabase.from('areas').insert(areasToInsert);
-    } else {
-      fid = userFamilies[0].family_id;
-    }
-    setFamilyId(fid);
-
-    const { data: areasData } = await supabase.from('areas').select('*').eq('family_id', fid).order('order_index', { ascending: true });
+  const loadAreas = async () => {
+    const { data: areasData } = await supabase
+      .from('areas')
+      .select('*')
+      .eq('place_id', currentPlaceId)
+      .order('order_index', { ascending: true });
     if (areasData) setAreas(areasData);
   };
 
   const handleAddArea = async (e) => {
     e.preventDefault();
-    if (!newArea.trim() || !familyId) return;
+    if (!newArea.trim() || !currentPlaceId) return;
 
     const newIndex = areas.length;
-    const { data, error } = await supabase.from('areas').insert([{ family_id: familyId, name: newArea.trim(), order_index: newIndex }]).select().single();
+    const { data, error } = await supabase
+      .from('areas')
+      .insert([{ place_id: currentPlaceId, name: newArea.trim(), order_index: newIndex }])
+      .select()
+      .single();
 
     if (!error && data) {
       setAreas([...areas, data]);
@@ -67,22 +59,20 @@ export default function Areas() {
 
     const newAreas = [...areas];
     const targetIndex = index + direction;
-    
-    // Troca as posições (Swap)
+
     const temp = newAreas[index];
     newAreas[index] = newAreas[targetIndex];
     newAreas[targetIndex] = temp;
 
     setAreas(newAreas);
 
-    // Atualiza todos no banco de uma vez
     const updates = newAreas.map((area, i) => ({
       id: area.id,
-      family_id: area.family_id,
+      place_id: area.place_id,
       name: area.name,
       order_index: i
     }));
-    
+
     await supabase.from('areas').upsert(updates);
   };
 
@@ -108,19 +98,18 @@ export default function Areas() {
         {areas.map((area, index) => (
           <div key={area.id} className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 0, padding: '12px 16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-              
-              {/* Botões de Mover */}
+
               <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', padding: '4px', background: 'var(--background)', borderRadius: '8px' }}>
-                <button 
-                  onClick={() => moveArea(index, -1)} 
-                  disabled={index === 0} 
+                <button
+                  onClick={() => moveArea(index, -1)}
+                  disabled={index === 0}
                   style={{ background: 'none', border: 'none', cursor: index === 0 ? 'default' : 'pointer', padding: '4px', opacity: index === 0 ? 0.3 : 1, display: 'flex' }}
                 >
                   <ArrowUp size={18} color="var(--primary)" />
                 </button>
-                <button 
-                  onClick={() => moveArea(index, 1)} 
-                  disabled={index === areas.length - 1} 
+                <button
+                  onClick={() => moveArea(index, 1)}
+                  disabled={index === areas.length - 1}
                   style={{ background: 'none', border: 'none', cursor: index === areas.length - 1 ? 'default' : 'pointer', padding: '4px', opacity: index === areas.length - 1 ? 0.3 : 1, display: 'flex' }}
                 >
                   <ArrowDown size={18} color="var(--primary)" />
@@ -129,7 +118,7 @@ export default function Areas() {
 
               <span style={{ fontWeight: 600, fontSize: '1.05rem' }}>{area.name}</span>
             </div>
-            
+
             <div style={{ display: 'flex', gap: '8px' }}>
               <button onClick={() => handleEditArea(area)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '8px' }}>
                 <Edit2 color="var(--primary)" size={20} />

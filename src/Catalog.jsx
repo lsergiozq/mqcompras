@@ -1,35 +1,30 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import { useAuth } from './AuthContext';
+import { usePlace } from './PlaceContext';
 import { Plus, Search, Image as ImageIcon, ArrowUp, ArrowDown, Edit2, Trash2 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 
 export default function Catalog() {
   const { user } = useAuth();
+  const { currentPlaceId } = usePlace();
   const navigate = useNavigate();
   const [products, setProducts] = useState([]);
-  const [familyId, setFamilyId] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [toastMsg, setToastMsg] = useState('');
 
   useEffect(() => {
-    if (user) loadCatalog();
-  }, [user]);
+    if (user && currentPlaceId) loadCatalog();
+  }, [user, currentPlaceId]);
 
   const loadCatalog = async () => {
-    let { data: userFamilies } = await supabase.from('user_families').select('family_id').eq('user_id', user.id);
-    let fid = null;
-    if (!userFamilies || userFamilies.length === 0) return;
-    fid = userFamilies[0].family_id;
-    setFamilyId(fid);
-
     const { data } = await supabase
       .from('products')
       .select('*, area:areas(name, order_index)')
-      .eq('family_id', fid)
+      .eq('place_id', currentPlaceId)
       .order('order_index', { ascending: true })
-      .order('name', { ascending: true }); // Fallback para alfabético caso tenham index igual
-    
+      .order('name', { ascending: true });
+
     if (data) setProducts(data);
   };
 
@@ -51,7 +46,13 @@ export default function Catalog() {
     if (qty === null) return;
     if (qty.trim() === '') qty = '1';
 
-    const { data: existingArray } = await supabase.from('list_items').select('*').eq('product_id', productId).limit(1);
+    const { data: existingArray } = await supabase
+      .from('list_items')
+      .select('*')
+      .eq('product_id', productId)
+      .eq('place_id', currentPlaceId)
+      .is('archived_at', null)
+      .limit(1);
     const existing = existingArray && existingArray.length > 0 ? existingArray[0] : null;
 
     if (existing) {
@@ -63,7 +64,7 @@ export default function Catalog() {
       }
     } else {
       await supabase.from('list_items').insert([{
-        family_id: familyId,
+        place_id: currentPlaceId,
         product_id: productId,
         quantity: qty,
         is_purchased: false
@@ -79,10 +80,8 @@ export default function Catalog() {
 
   const handleDeleteProduct = async (product) => {
     if (window.confirm(`Tem certeza que deseja apagar "${product.name}" do catálogo e de todas as listas?`)) {
-      // 1. Remove from shopping list first to avoid FK constraint errors
       await supabase.from('list_items').delete().eq('product_id', product.id);
-      
-      // 2. Remove image from storage if exists
+
       if (product.thumbnail_url) {
         try {
           const urlParts = product.thumbnail_url.split('/');
@@ -92,9 +91,7 @@ export default function Catalog() {
         } catch(e) {}
       }
 
-      // 3. Remove product
       await supabase.from('products').delete().eq('id', product.id);
-      
       setProducts(products.filter(p => p.id !== product.id));
     }
   };
@@ -104,7 +101,7 @@ export default function Catalog() {
     if ((direction === -1 && index === 0) || (direction === 1 && index === areaItems.length - 1)) return;
 
     const targetIndex = index + direction;
-    
+
     const newProducts = [...products];
     const p1 = areaItems[index];
     const p2 = areaItems[targetIndex];
@@ -112,10 +109,9 @@ export default function Catalog() {
     const idx1 = newProducts.findIndex(p => p.id === p1.id);
     const idx2 = newProducts.findIndex(p => p.id === p2.id);
 
-    // Se as ordens forem iguais (ex: tudo começa em 0), arruma a sequência toda 
     if (p1.order_index === p2.order_index || p1.order_index === null) {
         areaItems.forEach((item, i) => {
-            item.order_index = i * 10; // Espaçamento para facilitar upserts futuros
+            item.order_index = i * 10;
         });
     }
 
@@ -125,20 +121,19 @@ export default function Catalog() {
 
     newProducts[idx1] = p1;
     newProducts[idx2] = p2;
-    
+
     newProducts.sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
     setProducts([...newProducts]);
 
-    // Upsert na tabela apenas os itens dessa área
     const updates = areaItems.map((item) => ({
       id: item.id,
-      family_id: item.family_id,
+      place_id: item.place_id,
       area_id: item.area_id,
       name: item.name,
       thumbnail_url: item.thumbnail_url,
       order_index: item.order_index
     }));
-    
+
     await supabase.from('products').upsert(updates);
   };
 
@@ -153,9 +148,9 @@ export default function Catalog() {
 
       <div style={{ position: 'relative', marginBottom: '24px' }}>
         <Search size={20} style={{ position: 'absolute', left: '12px', top: '12px', color: 'var(--text-muted)' }} />
-        <input 
-          className="input-field" 
-          placeholder="Buscar nos meus produtos..." 
+        <input
+          className="input-field"
+          placeholder="Buscar nos meus produtos..."
           style={{ paddingLeft: '40px' }}
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
@@ -165,7 +160,7 @@ export default function Catalog() {
       {products.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)' }}>
           <p>Você ainda não cadastrou nenhum produto.</p>
-          <p style={{ fontSize: '0.875rem', marginTop: '8px' }}>Cadastre os produtos que sua casa consome clicando em "Novo".</p>
+          <p style={{ fontSize: '0.875rem', marginTop: '8px' }}>Cadastre os produtos que você consome clicando em "Novo".</p>
         </div>
       ) : sortedAreas.length === 0 ? (
         <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: '48px' }}>
@@ -177,8 +172,8 @@ export default function Catalog() {
             <div key={areaName}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                 <h3 style={{ fontSize: '1.125rem', color: 'var(--primary)', margin: 0 }}>{areaName}</h3>
-                <button 
-                  onClick={() => navigate('/add', { state: { preSelectedArea: groupedProducts[areaName].areaId } })} 
+                <button
+                  onClick={() => navigate('/add', { state: { preSelectedArea: groupedProducts[areaName].areaId } })}
                   style={{ background: 'var(--primary)', border: 'none', color: 'white', borderRadius: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '4px 10px', gap: '4px', fontSize: '0.75rem', fontWeight: 600 }}
                 >
                   <Plus size={14} /> Novo aqui
@@ -187,7 +182,7 @@ export default function Catalog() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {groupedProducts[areaName].items.map((p, index) => (
                   <div key={p.id} className="card" style={{ marginBottom: 0, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    
+
                     {!searchQuery && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', padding: '2px', background: 'var(--background)', borderRadius: '6px' }}>
                         <button onClick={() => moveProduct(areaName, index, -1)} disabled={index === 0} style={{ background: 'none', border: 'none', cursor: index === 0 ? 'default' : 'pointer', padding: '2px', opacity: index === 0 ? 0.3 : 1, display: 'flex' }}>
@@ -206,11 +201,11 @@ export default function Catalog() {
                         <ImageIcon size={20} color="var(--text-muted)" />
                       </div>
                     )}
-                    
+
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 500 }}>{p.name}</div>
                     </div>
-                    
+
                     {!searchQuery && (
                       <div style={{ display: 'flex', gap: '4px' }}>
                         <button onClick={() => handleEditProduct(p)} className="btn" style={{ padding: '8px', backgroundColor: 'transparent', color: 'var(--primary)' }}>
@@ -221,7 +216,7 @@ export default function Catalog() {
                         </button>
                       </div>
                     )}
-                    
+
                     <button onClick={() => addToShoppingList(p.id)} className="btn" style={{ padding: '8px', backgroundColor: 'var(--background)', color: 'var(--primary)' }}>
                       <Plus size={20} />
                     </button>

@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import { useAuth } from './AuthContext';
+import { usePlace } from './PlaceContext';
 import { ArrowLeft, Camera } from 'lucide-react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { compressImage } from './imageUtils';
 
 export default function AddProduct() {
   const { user } = useAuth();
+  const { currentPlaceId, places } = usePlace();
   const navigate = useNavigate();
   const location = useLocation();
   const editingProduct = location.state?.product || null;
@@ -15,15 +17,19 @@ export default function AddProduct() {
   const [areas, setAreas] = useState([]);
   const [name, setName] = useState('');
   const [selectedArea, setSelectedArea] = useState('');
-  const [familyId, setFamilyId] = useState(null);
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
+  // Mitigante 2: também adicionar este produto a outros Locais do usuário
+  const [alsoAddToPlaces, setAlsoAddToPlaces] = useState([]);
+
+  const otherPlaces = (places || []).filter(p => p.id !== currentPlaceId);
+  const showAlsoAdd = !editingProduct && otherPlaces.length > 0;
 
   useEffect(() => {
-    loadAreas();
-  }, [user]);
+    if (user && currentPlaceId) loadAreas();
+  }, [user, currentPlaceId]);
 
   useEffect(() => {
     if (editingProduct && areas.length > 0) {
@@ -38,26 +44,15 @@ export default function AddProduct() {
   }, [editingProduct, preSelectedArea, areas]);
 
   const loadAreas = async () => {
-    let { data: userFamilies } = await supabase.from('user_families').select('family_id').eq('user_id', user.id);
-    
-    let fid = null;
-    if (!userFamilies || userFamilies.length === 0) {
-      const { data: newFamily } = await supabase.from('families').insert([{ name: 'Minha Família' }]).select().single();
-      fid = newFamily.id;
-      await supabase.from('user_families').insert([{ user_id: user.id, family_id: fid }]);
-
-      const defaultAreas = ['Hortifruti', 'Padaria', 'Frios', 'Açougue', 'Limpeza', 'Mercearia'];
-      const areasToInsert = defaultAreas.map((n, index) => ({ family_id: fid, name: n, order_index: index }));
-      await supabase.from('areas').insert(areasToInsert);
-    } else {
-      fid = userFamilies[0].family_id;
-    }
-
-    setFamilyId(fid);
-
-    const { data } = await supabase.from('areas').select('*').eq('family_id', fid).order('order_index');
+    const { data } = await supabase
+      .from('areas')
+      .select('*')
+      .eq('place_id', currentPlaceId)
+      .order('order_index');
     setAreas(data || []);
-    if (data && data.length > 0 && !editingProduct) setSelectedArea(data[0].id);
+    if (data && data.length > 0 && !editingProduct && !preSelectedArea) {
+      setSelectedArea(data[0].id);
+    }
   };
 
   const handleImageChange = async (e) => {
@@ -69,10 +64,16 @@ export default function AddProduct() {
     }
   };
 
+  const togglePlaceChip = (placeId) => {
+    setAlsoAddToPlaces(prev =>
+      prev.includes(placeId) ? prev.filter(id => id !== placeId) : [...prev, placeId]
+    );
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!name || !selectedArea || !familyId) {
-      alert('Preencha o nome e o corredor!');
+    if (!name || !currentPlaceId) {
+      alert('Preencha o nome!');
       return;
     }
     setLoading(true);
@@ -81,7 +82,7 @@ export default function AddProduct() {
       let thumbnailUrl = editingProduct?.thumbnail_url || null;
 
       if (imageFile) {
-        const fileName = `${familyId}/${Date.now()}-${Math.random().toString(36).substring(7)}.jpg`;
+        const fileName = `${currentPlaceId}/${Date.now()}-${Math.random().toString(36).substring(7)}.jpg`;
         const { error: uploadError } = await supabase.storage.from('thumbnails').upload(fileName, imageFile);
         if (!uploadError) {
           const { data } = supabase.storage.from('thumbnails').getPublicUrl(fileName);
@@ -90,36 +91,49 @@ export default function AddProduct() {
       }
 
       if (editingProduct) {
-        // Atualiza
         const { error: productError } = await supabase.from('products').update({
-          area_id: selectedArea,
+          area_id: selectedArea || null,
           name,
           thumbnail_url: thumbnailUrl
         }).eq('id', editingProduct.id);
-        
+
         if (productError) throw productError;
         navigate('/catalog');
       } else {
-        // Pega o número de itens na área para colocar no fim da fila
-        const { count } = await supabase.from('products').select('*', { count: 'exact', head: true }).eq('area_id', selectedArea);
+        // Local atual
+        const { count } = await supabase.from('products').select('*', { count: 'exact', head: true }).eq('area_id', selectedArea || null);
         const newIndex = (count || 0) * 10;
 
-        // Insere
         const { error: productError } = await supabase.from('products').insert([{
-          family_id: familyId,
-          area_id: selectedArea,
+          place_id: currentPlaceId,
+          area_id: selectedArea || null,
           name: name.trim(),
           thumbnail_url: thumbnailUrl,
           order_index: newIndex
         }]);
 
         if (productError) throw productError;
-        
-        // Em vez de voltar, limpa o formulário para adicionar outro!
-        setSuccessMsg(`"${name}" foi salvo!`);
+
+        // Mitigante 2: também adicionar a outros Locais selecionados (sem area_id, sem reuso da imagem na pasta de outro Local — a URL pública vale igual)
+        if (alsoAddToPlaces.length > 0) {
+          const extraInserts = alsoAddToPlaces.map(pid => ({
+            place_id: pid,
+            area_id: null, // o outro Local pode ter corredores diferentes; usuário ajusta depois
+            name: name.trim(),
+            thumbnail_url: thumbnailUrl,
+            order_index: 0
+          }));
+          await supabase.from('products').insert(extraInserts);
+        }
+
+        const extraMsg = alsoAddToPlaces.length > 0
+          ? ` (também em ${alsoAddToPlaces.length} ${alsoAddToPlaces.length === 1 ? 'outro Local' : 'outros Locais'})`
+          : '';
+        setSuccessMsg(`"${name}" foi salvo!${extraMsg}`);
         setName('');
         setImageFile(null);
         setImagePreview(null);
+        setAlsoAddToPlaces([]);
         setTimeout(() => setSuccessMsg(''), 3000);
       }
     } catch (err) {
@@ -139,9 +153,9 @@ export default function AddProduct() {
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
         <div className="card" style={{ marginBottom: 0 }}>
           <label style={{ display: 'block', marginBottom: '8px', fontWeight: 500 }}>Nome do Produto</label>
-          <input 
-            className="input-field" 
-            placeholder="Ex: Leite Integral" 
+          <input
+            className="input-field"
+            placeholder="Ex: Leite Integral"
             value={name}
             onChange={e => setName(e.target.value)}
             required
@@ -150,12 +164,12 @@ export default function AddProduct() {
 
         <div className="card" style={{ marginBottom: 0 }}>
           <label style={{ display: 'block', marginBottom: '8px', fontWeight: 500 }}>Corredor (Área)</label>
-          <select 
-            className="input-field" 
+          <select
+            className="input-field"
             value={selectedArea}
             onChange={e => setSelectedArea(e.target.value)}
-            required
           >
+            <option value="">Sem corredor</option>
             {areas.map(area => (
               <option key={area.id} value={area.id}>{area.name}</option>
             ))}
@@ -165,21 +179,21 @@ export default function AddProduct() {
         <div className="card" style={{ marginBottom: 0 }}>
           <label style={{ display: 'block', marginBottom: '8px', fontWeight: 500 }}>Foto (opcional)</label>
           <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '12px' }}>
-            {editingProduct && editingProduct.thumbnail_url 
+            {editingProduct && editingProduct.thumbnail_url
               ? 'Tire uma nova foto se quiser substituir a atual.'
               : 'Tire uma foto para facilitar na hora de achar no mercado.'}
           </p>
-          
+
           <label style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             border: '2px dashed var(--border)', borderRadius: 'var(--radius-lg)', padding: '24px',
             cursor: 'pointer', backgroundColor: 'var(--background)', color: 'var(--primary)',
             position: 'relative', overflow: 'hidden'
           }}>
-            <input 
-              type="file" 
-              accept="image/*" 
-              capture="environment" 
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
               onChange={handleImageChange}
               style={{ display: 'none' }}
             />
@@ -194,12 +208,46 @@ export default function AddProduct() {
           </label>
         </div>
 
+        {showAlsoAdd && (
+          <div className="card" style={{ marginBottom: 0 }}>
+            <label style={{ display: 'block', marginBottom: '4px', fontWeight: 500 }}>Adicionar também em</label>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '12px' }}>
+              Toque nos Locais onde você também quer cadastrar este produto.
+            </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+              {otherPlaces.map(p => {
+                const active = alsoAddToPlaces.includes(p.id);
+                return (
+                  <button
+                    type="button"
+                    key={p.id}
+                    onClick={() => togglePlaceChip(p.id)}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: '999px',
+                      border: `1px solid ${active ? 'var(--primary)' : 'var(--border)'}`,
+                      backgroundColor: active ? 'var(--primary)' : 'var(--surface)',
+                      color: active ? '#fff' : 'var(--text-main)',
+                      fontSize: '0.875rem',
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    {active ? '✓ ' : ''}{p.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         <button type="submit" className="btn btn-primary" disabled={loading} style={{ padding: '16px', fontSize: '1.125rem' }}>
           {loading ? 'Salvando...' : (editingProduct ? 'Salvar Alterações' : 'Salvar e Adicionar Outro')}
         </button>
 
         {successMsg && (
-          <div style={{ padding: '12px', backgroundColor: 'var(--secondary)', color: 'white', borderRadius: '8px', textAlign: 'center', fontWeight: 500, animation: 'fadeIn 0.3s ease' }}>
+          <div style={{ padding: '12px', backgroundColor: 'var(--secondary)', color: 'white', borderRadius: '8px', textAlign: 'center', fontWeight: 500 }}>
             ✓ {successMsg}
           </div>
         )}

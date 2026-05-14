@@ -12,8 +12,8 @@ export default function Auth() {
 
   return (
     <div className="card" style={{ textAlign: 'center', padding: '2rem 1rem' }}>
-      <h2 style={{ fontSize: '1.25rem', marginBottom: '8px' }}>Acesse sua Família</h2>
-      <p style={{ color: 'var(--text-muted)' }}>Faça login com sua conta Google para ver a lista de compras da sua casa.</p>
+      <h2 style={{ fontSize: '1.25rem', marginBottom: '8px' }}>Acesse seu Local</h2>
+      <p style={{ color: 'var(--text-muted)' }}>Faça login com sua conta Google para ver suas listas de compras.</p>
       
       <button 
         onClick={handleGoogleLogin} 
