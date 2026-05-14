@@ -3,10 +3,14 @@ import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
 import { AuthProvider } from './AuthContext.jsx'
 import './index.css'
-import { registerSW } from 'virtual:pwa-register'
 
-// Atualiza o app silenciosamente quando houver uma nova versão
-registerSW({ immediate: true })
+// Registro do Service Worker do PWA — tolerante a falha.
+// Se o pacote vite-plugin-pwa ainda não estiver instalado, o app continua funcionando.
+import('virtual:pwa-register')
+  .then(({ registerSW }) => registerSW({ immediate: true }))
+  .catch(() => {
+    // Sem PWA, sem problema. Pode ser ambiente dev sem o plugin ativo.
+  })
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
