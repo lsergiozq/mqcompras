@@ -141,7 +141,7 @@ export default function ShoppingList() {
   const progressPercent = totalCount > 0 ? Math.round((purchasedCount / totalCount) * 100) : 0;
 
   return (
-    <div style={{ paddingBottom: '80px' }}>
+    <div style={{ paddingBottom: items.some(i => i.is_purchased) ? '160px' : '80px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <h2 style={{ fontSize: '1.5rem' }}>Lista de Compras</h2>
       </div>
@@ -284,8 +284,19 @@ export default function ShoppingList() {
       )}
 
       {items.some(i => i.is_purchased) && (
-        <div style={{ position: 'fixed', bottom: '24px', left: '0', right: '0', display: 'flex', justifyContent: 'center', padding: '0 20px', zIndex: 30 }}>
-          <button onClick={finishShopping} className="btn btn-primary" style={{ width: '100%', maxWidth: '600px', padding: '16px', boxShadow: 'var(--shadow-lg)', backgroundColor: 'var(--secondary)' }}>
+        <div style={{ position: 'fixed', bottom: 'calc(64px + env(safe-area-inset-bottom, 0px) + 12px)', left: '0', right: '0', display: 'flex', justifyContent: 'center', padding: '0 16px', zIndex: 30, pointerEvents: 'none' }}>
+          <button
+            onClick={finishShopping}
+            className="btn btn-primary"
+            style={{
+              width: '100%',
+              maxWidth: '600px',
+              padding: '16px',
+              boxShadow: 'var(--shadow-lg)',
+              backgroundColor: 'var(--secondary)',
+              pointerEvents: 'auto',
+            }}
+          >
             Finalizar Compra (Comprei!)
           </button>
         </div>
