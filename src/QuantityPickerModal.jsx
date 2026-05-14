@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import useKeyboardInset from './useKeyboardInset';
 
 const QUICK_AMOUNTS = ['1', '2', '3', '4', '5', '6'];
 
@@ -14,6 +15,7 @@ export default function QuantityPickerModal({
   onRemove,
 }) {
   const [quantity, setQuantity] = useState(initialQuantity);
+  const keyboardInset = useKeyboardInset(open);
 
   if (!open) return null;
 
@@ -34,7 +36,11 @@ export default function QuantityPickerModal({
         alignItems: 'flex-end',
         justifyContent: 'center',
         zIndex: 500,
-        padding: '16px',
+        paddingTop: '16px',
+        paddingLeft: '16px',
+        paddingRight: '16px',
+        paddingBottom: `calc(16px + env(safe-area-inset-bottom, 0px) + ${keyboardInset}px)`,
+        transition: 'padding-bottom 0.18s ease-out',
       }}
     >
       <div
@@ -46,6 +52,8 @@ export default function QuantityPickerModal({
           marginBottom: 0,
           borderRadius: '20px',
           padding: '20px',
+          maxHeight: 'calc(100dvh - 32px)',
+          overflowY: 'auto',
         }}
       >
         <h3 style={{ margin: 0, fontSize: '1.125rem' }}>{title}</h3>
