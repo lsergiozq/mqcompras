@@ -1,9 +1,55 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import { useAuth } from './AuthContext';
 import { usePlace } from './PlaceContext';
 import { Link } from 'react-router-dom';
-import { CheckCircle2, Circle, Plus, Search, Image as ImageIcon, ShoppingBag } from 'lucide-react';
+import { CheckCircle2, Circle, Plus, Search, ShoppingBag } from 'lucide-react';
+
+function buildPurchaseSummary(rows) {
+  const now = Date.now();
+  const thirtyDaysAgo = now - (30 * 24 * 60 * 60 * 1000);
+  const summaryByProductId = {};
+
+  rows.forEach((row) => {
+    if (!row.product_id || !row.archived_at) return;
+
+    const archivedTime = new Date(row.archived_at).getTime();
+    if (!summaryByProductId[row.product_id]) {
+      summaryByProductId[row.product_id] = {
+        lastArchivedAt: row.archived_at,
+        countLast30Days: 0,
+      };
+    }
+
+    if (archivedTime >= thirtyDaysAgo) {
+      summaryByProductId[row.product_id].countLast30Days += 1;
+    }
+  });
+
+  return summaryByProductId;
+}
+
+function formatLastPurchaseText(archivedAt) {
+  if (!archivedAt) return null;
+
+  const purchaseDate = new Date(archivedAt);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const purchaseDay = new Date(purchaseDate);
+  purchaseDay.setHours(0, 0, 0, 0);
+
+  const diffDays = Math.round((today.getTime() - purchaseDay.getTime()) / (24 * 60 * 60 * 1000));
+
+  if (diffDays <= 0) return 'Ultima compra hoje';
+  if (diffDays === 1) return 'Ultima compra ha 1 dia';
+  return `Ultima compra ha ${diffDays} dias`;
+}
+
+function formatPurchaseSummary(summary) {
+  if (!summary?.lastArchivedAt) return null;
+  return formatLastPurchaseText(summary.lastArchivedAt);
+}
 
 export default function ShoppingList() {
   const { user } = useAuth();
@@ -28,12 +74,12 @@ export default function ShoppingList() {
     return () => { supabase.removeChannel(channel); };
   }, [user, currentPlaceId]);
 
-  const loadCatalog = async (pid) => {
+  async function loadCatalog(pid) {
     const { data: products } = await supabase.from('products').select('*').eq('place_id', pid);
     if (products) setAllProducts(products);
-  };
+  }
 
-  const fetchItems = async (pid) => {
+  async function fetchItems(pid) {
     const { data } = await supabase
       .from('list_items')
       .select(`
@@ -43,8 +89,29 @@ export default function ShoppingList() {
       .eq('place_id', pid)
       .is('archived_at', null);
 
-    if (data) setItems(data);
-  };
+    if (!data) return;
+
+    const productIds = [...new Set(data.map(item => item.product?.id).filter(Boolean))];
+    if (productIds.length === 0) {
+      setItems(data);
+      return;
+    }
+
+    const { data: historyRows } = await supabase
+      .from('list_items')
+      .select('product_id, archived_at')
+      .eq('place_id', pid)
+      .in('product_id', productIds)
+      .not('archived_at', 'is', null)
+      .order('archived_at', { ascending: false });
+
+    const purchaseSummaryByProductId = buildPurchaseSummary(historyRows || []);
+
+    setItems(data.map(item => ({
+      ...item,
+      purchaseSummary: purchaseSummaryByProductId[item.product?.id] || null,
+    })));
+  }
 
   const togglePurchased = async (id, currentStatus) => {
     setItems(items.map(item => item.id === id ? { ...item, is_purchased: !currentStatus } : item));
@@ -224,6 +291,11 @@ export default function ShoppingList() {
 
                       <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 600 }}>{item.product.name}</div>
+                        {item.purchaseSummary && (
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                            {formatPurchaseSummary(item.purchaseSummary)}
+                          </div>
+                        )}
                         <div
                           style={{ fontSize: '0.875rem', color: 'var(--primary)', cursor: 'pointer', display: 'inline-block', padding: '2px 6px', backgroundColor: 'var(--background)', borderRadius: '4px', marginTop: '4px', fontWeight: 500 }}
                           onClick={(e) => {
