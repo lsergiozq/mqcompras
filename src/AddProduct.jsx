@@ -13,6 +13,7 @@ export default function AddProduct() {
   const location = useLocation();
   const editingProduct = location.state?.product || null;
   const preSelectedArea = location.state?.preSelectedArea || null;
+  const suggestedName = location.state?.suggestedName || null;
 
   const [areas, setAreas] = useState([]);
   const [name, setName] = useState('');
@@ -44,6 +45,16 @@ export default function AddProduct() {
       setSelectedArea(preSelectedArea);
     }
   }, [editingProduct, preSelectedArea, areas]);
+
+  // Vindo do reconhecimento de voz (botão "Cadastrar" do VoiceResultModal):
+  // pré-preenche o campo de Nome com o nome falado (já capitalizado).
+  // Só dispara uma vez, quando suggestedName chega, e só se não está editando.
+  useEffect(() => {
+    if (suggestedName && !editingProduct) {
+      setName(suggestedName);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [suggestedName]);
 
   const loadAreas = async () => {
     const { data } = await supabase

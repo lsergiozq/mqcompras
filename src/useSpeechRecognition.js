@@ -97,3 +97,17 @@ export function splitVoiceTranscript(text) {
     .map(s => s.trim())
     .filter(s => s.length > 0);
 }
+
+/**
+ * Capitaliza a primeira letra (respeitando acentos). Mantém o restante igual.
+ * "leite" -> "Leite"
+ * "óleo de soja" -> "Óleo de soja"
+ * "ABC" -> "ABC" (já começa em maiúsculo)
+ */
+export function capitalizeFirst(text) {
+  if (!text) return text;
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return trimmed;
+  // Usa locale pt-BR para que acentos funcionem corretamente
+  return trimmed.charAt(0).toLocaleUpperCase('pt-BR') + trimmed.slice(1);
+}

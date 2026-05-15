@@ -6,7 +6,7 @@ import { Link } from 'react-router-dom';
 import { CheckCircle2, Circle, Plus, Search, ShoppingBag, Mic, MicOff } from 'lucide-react';
 import QuantityPickerModal from './QuantityPickerModal';
 import { buildProductInsights, formatLastPurchaseText, getSortedProductMatches } from './productDiscovery';
-import useSpeechRecognition, { splitVoiceTranscript } from './useSpeechRecognition';
+import useSpeechRecognition, { splitVoiceTranscript, capitalizeFirst } from './useSpeechRecognition';
 import VoiceResultModal from './VoiceResultModal';
 
 export default function ShoppingList() {
@@ -84,7 +84,8 @@ export default function ShoppingList() {
     const unmatched = [];
     const usedIds = new Set();
 
-    for (const phrase of phrases) {
+    for (const rawPhrase of phrases) {
+      const phrase = capitalizeFirst(rawPhrase);
       // Aproveita o mesmo matching usado no autocomplete (fuzzy + prioridade por uso)
       const candidates = getSortedProductMatches(allProducts, phrase, productInsights);
       const best = candidates.find(p => !usedIds.has(p.id));
