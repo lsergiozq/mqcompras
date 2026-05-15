@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import { useAuth } from './AuthContext';
 import { usePlace } from './PlaceContext';
-import { ArrowLeft /*, Camera */ } from 'lucide-react';
+import { ArrowLeft, Mic, MicOff /*, Camera */ } from 'lucide-react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
+import useSpeechRecognition, { capitalizeFirst } from './useSpeechRecognition';
 // import { compressImage } from './imageUtils'; // [IMG-OFF] reativar quando voltar com upload de imagens
 
 export default function AddProduct() {
@@ -28,6 +29,17 @@ export default function AddProduct() {
 
   const otherPlaces = (places || []).filter(p => p.id !== currentPlaceId);
   const showAlsoAdd = !editingProduct && otherPlaces.length > 0;
+
+  // Reconhecimento de voz para ditar o nome do produto.
+  const {
+    supported: voiceSupported,
+    listening,
+    transcript,
+    error: voiceError,
+    start: startVoice,
+    stop: stopVoice,
+    reset: resetVoice,
+  } = useSpeechRecognition({ lang: 'pt-BR' });
 
   useEffect(() => {
     if (user && currentPlaceId) loadAreas();
@@ -55,6 +67,37 @@ export default function AddProduct() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [suggestedName]);
+
+  // Quando o usuário termina de ditar (listening: true -> false) e há transcrição,
+  // preenche o campo Nome com a fala capitalizada.
+  useEffect(() => {
+    if (listening) return;
+    if (!transcript) return;
+    setName(capitalizeFirst(transcript));
+    resetVoice();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listening, transcript]);
+
+  // Tratamento de erros do microfone (permissão, sem rede, etc.)
+  useEffect(() => {
+    if (!voiceError) return;
+    const messages = {
+      'not-allowed': 'Você precisa permitir o uso do microfone no navegador.',
+      'no-speech': 'Não ouvi nada. Tente de novo.',
+      'audio-capture': 'Não consegui acessar o microfone.',
+      'network': 'Sem internet para o reconhecimento de voz.',
+    };
+    alert(messages[voiceError] || 'Erro no reconhecimento de voz. Tente novamente.');
+    resetVoice();
+  }, [voiceError, resetVoice]);
+
+  const handleVoiceClick = () => {
+    if (listening) {
+      stopVoice();
+    } else {
+      startVoice();
+    }
+  };
 
   const loadAreas = async () => {
     const { data } = await supabase
@@ -171,13 +214,35 @@ export default function AddProduct() {
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
         <div className="card" style={{ marginBottom: 0 }}>
           <label style={{ display: 'block', marginBottom: '8px', fontWeight: 500 }}>Nome do Produto</label>
-          <input
-            className="input-field"
-            placeholder="Ex: Leite Integral"
-            value={name}
-            onChange={e => setName(e.target.value)}
-            required
-          />
+          <div style={{ position: 'relative' }}>
+            <input
+              className="input-field"
+              placeholder={listening ? 'Ouvindo... fale o nome' : 'Ex: Leite Integral'}
+              value={name}
+              onChange={e => setName(e.target.value)}
+              style={voiceSupported ? { paddingRight: '46px' } : undefined}
+              required
+            />
+            {voiceSupported && (
+              <button
+                type="button"
+                onClick={handleVoiceClick}
+                aria-label={listening ? 'Parar gravação' : 'Falar o nome do produto'}
+                title={listening ? 'Parar gravação' : 'Falar o nome do produto'}
+                style={{
+                  position: 'absolute', right: '6px', top: '50%', transform: 'translateY(-50%)',
+                  width: '36px', height: '36px',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: listening ? 'var(--danger)' : 'var(--background)',
+                  border: 'none', borderRadius: '50%', cursor: 'pointer',
+                  transition: 'background 0.2s',
+                  animation: listening ? 'pulse 1.2s ease-in-out infinite' : 'none',
+                }}
+              >
+                {listening ? <MicOff size={18} color="white" /> : <Mic size={18} color="var(--primary)" />}
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="card" style={{ marginBottom: 0 }}>
