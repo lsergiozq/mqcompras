@@ -2,10 +2,11 @@ import { startTransition, useState, useEffect, useCallback } from 'react';
 import { supabase } from './supabase';
 import { useAuth } from './AuthContext';
 import { usePlace } from './PlaceContext';
-import { Plus, Search, ArrowUp, ArrowDown, Edit2, Trash2 } from 'lucide-react';
+import { Plus, Search, ArrowUp, ArrowDown, Edit2, Trash2, Mic, MicOff } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import QuantityPickerModal from './QuantityPickerModal';
 import { buildProductInsights, getSortedProductMatches } from './productDiscovery';
+import useSpeechRecognition, { capitalizeFirst } from './useSpeechRecognition';
 
 export default function Catalog() {
   const { user } = useAuth();
@@ -16,6 +17,42 @@ export default function Catalog() {
   const [searchQuery, setSearchQuery] = useState('');
   const [toastMsg, setToastMsg] = useState('');
   const [quantityDialog, setQuantityDialog] = useState({ open: false, product: null, initialQuantity: '1' });
+
+  // Reconhecimento de voz para busca no catálogo
+  const {
+    supported: voiceSupported,
+    listening,
+    transcript,
+    error: voiceError,
+    start: startVoice,
+    stop: stopVoice,
+    reset: resetVoice,
+  } = useSpeechRecognition({ lang: 'pt-BR' });
+
+  // Quando o usuário termina de ditar, joga a fala (capitalizada) no campo de busca.
+  useEffect(() => {
+    if (listening) return;
+    if (!transcript) return;
+    setSearchQuery(capitalizeFirst(transcript));
+    resetVoice();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listening, transcript]);
+
+  useEffect(() => {
+    if (!voiceError) return;
+    const messages = {
+      'not-allowed': 'Você precisa permitir o uso do microfone no navegador.',
+      'no-speech': 'Não ouvi nada. Tente de novo.',
+      'audio-capture': 'Não consegui acessar o microfone.',
+      'network': 'Sem internet para o reconhecimento de voz.',
+    };
+    alert(messages[voiceError] || 'Erro no reconhecimento de voz. Tente novamente.');
+    resetVoice();
+  }, [voiceError, resetVoice]);
+
+  const handleVoiceClick = () => {
+    if (listening) stopVoice(); else startVoice();
+  };
 
   const loadCatalog = useCallback(async () => {
     const { data } = await supabase
@@ -184,11 +221,30 @@ export default function Catalog() {
         <Search size={20} style={{ position: 'absolute', left: '12px', top: '12px', color: 'var(--text-muted)' }} />
         <input
           className="input-field"
-          placeholder="Buscar nos meus produtos..."
-          style={{ paddingLeft: '40px' }}
+          placeholder={listening ? 'Ouvindo... fale o nome' : 'Buscar nos meus produtos...'}
+          style={{ paddingLeft: '40px', paddingRight: voiceSupported ? '46px' : '14px' }}
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
         />
+        {voiceSupported && (
+          <button
+            type="button"
+            onClick={handleVoiceClick}
+            aria-label={listening ? 'Parar gravação' : 'Buscar por voz'}
+            title={listening ? 'Parar gravação' : 'Buscar por voz'}
+            style={{
+              position: 'absolute', right: '6px', top: '50%', transform: 'translateY(-50%)',
+              width: '36px', height: '36px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: listening ? 'var(--danger)' : 'var(--background)',
+              border: 'none', borderRadius: '50%', cursor: 'pointer',
+              transition: 'background 0.2s',
+              animation: listening ? 'pulse 1.2s ease-in-out infinite' : 'none',
+            }}
+          >
+            {listening ? <MicOff size={18} color="white" /> : <Mic size={18} color="var(--primary)" />}
+          </button>
+        )}
       </div>
 
       {products.length === 0 ? (
