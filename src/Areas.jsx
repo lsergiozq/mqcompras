@@ -7,6 +7,7 @@ import { useAuth } from './AuthContext';
 import { usePlace } from './PlaceContext';
 import { ArrowLeft, Plus, Trash2, Edit2, GripVertical } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { normalizeSearchText } from './productDiscovery';
 
 function SortableAreaItem({ area, onEdit, onDelete }) {
   const {
@@ -101,14 +102,30 @@ export default function Areas() {
     if (user && currentPlaceId) loadAreas();
   }, [user, currentPlaceId, loadAreas]);
 
+  const hasDuplicateAreaName = (candidateName, ignoreId = null) => {
+    const normalizedCandidate = normalizeSearchText(candidateName);
+    if (!normalizedCandidate) return false;
+
+    return areas.some((area) => (
+      area.id !== ignoreId
+      && normalizeSearchText(area.name) === normalizedCandidate
+    ));
+  };
+
   const handleAddArea = async (e) => {
     e.preventDefault();
     if (!newArea.trim() || !currentPlaceId) return;
 
+    const trimmedName = newArea.trim();
+    if (hasDuplicateAreaName(trimmedName)) {
+      alert('Já existe um corredor com esse nome neste Local.');
+      return;
+    }
+
     const newIndex = areas.length;
     const { data, error } = await supabase
       .from('areas')
-      .insert([{ place_id: currentPlaceId, name: newArea.trim(), order_index: newIndex }])
+      .insert([{ place_id: currentPlaceId, name: trimmedName, order_index: newIndex }])
       .select()
       .single();
 
@@ -125,10 +142,18 @@ export default function Areas() {
 
   const handleEditArea = async (area) => {
     const newName = window.prompt('Novo nome do corredor:', area.name);
-    if (newName !== null && newName.trim() !== '' && newName.trim() !== area.name) {
-      await supabase.from('areas').update({ name: newName.trim() }).eq('id', area.id);
-      setAreas(areas.map(a => a.id === area.id ? { ...a, name: newName.trim() } : a));
+    if (newName === null) return;
+
+    const trimmedName = newName.trim();
+    if (!trimmedName || trimmedName === area.name) return;
+
+    if (hasDuplicateAreaName(trimmedName, area.id)) {
+      alert('Já existe um corredor com esse nome neste Local.');
+      return;
     }
+
+    await supabase.from('areas').update({ name: trimmedName }).eq('id', area.id);
+    setAreas(areas.map(a => a.id === area.id ? { ...a, name: trimmedName } : a));
   };
 
   const saveAreaOrder = async (orderedAreas) => {

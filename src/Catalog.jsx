@@ -1,4 +1,4 @@
-import { startTransition, useState, useEffect, useCallback } from 'react';
+import { startTransition, useState, useEffect, useCallback, useRef } from 'react';
 import { DndContext, DragOverlay, PointerSensor, closestCenter, useDroppable, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -43,7 +43,7 @@ function CatalogDragPreview({ product }) {
   );
 }
 
-function DroppableCatalogGroup({ group, showDragHint, isTargeted, onCreateHere, children }) {
+function DroppableCatalogGroup({ group, showDragHint, isTargeted, onCreateHere, registerSection, children }) {
   const { setNodeRef, isOver } = useDroppable({
     id: `area-drop-${group.key}`,
     data: {
@@ -58,7 +58,10 @@ function DroppableCatalogGroup({ group, showDragHint, isTargeted, onCreateHere, 
 
   return (
     <div
-      ref={setNodeRef}
+      ref={(node) => {
+        setNodeRef(node);
+        registerSection(group.key, node);
+      }}
       style={{
         borderRadius: '18px',
         padding: '8px',
@@ -195,6 +198,8 @@ export default function Catalog() {
   const [quantityDialog, setQuantityDialog] = useState({ open: false, product: null, initialQuantity: '1' });
   const [activeDragProduct, setActiveDragProduct] = useState(null);
   const [overAreaKey, setOverAreaKey] = useState(null);
+  const [activeViewportAreaKey, setActiveViewportAreaKey] = useState(null);
+  const groupSectionRefs = useRef(new Map());
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 6 },
@@ -305,6 +310,86 @@ export default function Catalog() {
   }, {});
 
   const sortedGroups = Object.values(groupedProducts).sort((a, b) => a.order - b.order);
+
+  const registerGroupSection = useCallback((groupKey, node) => {
+    if (node) {
+      groupSectionRefs.current.set(groupKey, node);
+      return;
+    }
+
+    groupSectionRefs.current.delete(groupKey);
+  }, []);
+
+  useEffect(() => {
+    if (searchQuery || sortedGroups.length === 0) return undefined;
+
+    const sectionEntries = sortedGroups
+      .map((group) => ({ key: group.key, node: groupSectionRefs.current.get(group.key) }))
+      .filter((entry) => entry.node instanceof HTMLElement);
+
+    if (sectionEntries.length === 0) return undefined;
+
+    let frameId = null;
+
+    const updateActiveViewportArea = () => {
+      const viewportTop = 112;
+      const viewportBottom = window.innerHeight - 120;
+      let bestKey = null;
+      let bestVisibleHeight = 0;
+      let bestTop = Number.POSITIVE_INFINITY;
+
+      sectionEntries.forEach(({ key, node }) => {
+        const rect = node.getBoundingClientRect();
+        const visibleHeight = Math.min(rect.bottom, viewportBottom) - Math.max(rect.top, viewportTop);
+
+        if (visibleHeight <= 0) return;
+
+        if (visibleHeight > bestVisibleHeight || (visibleHeight === bestVisibleHeight && rect.top < bestTop)) {
+          bestKey = key;
+          bestVisibleHeight = visibleHeight;
+          bestTop = rect.top;
+        }
+      });
+
+      startTransition(() => {
+        setActiveViewportAreaKey((currentKey) => currentKey === bestKey ? currentKey : bestKey);
+      });
+    };
+
+    const scheduleViewportUpdate = () => {
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(updateActiveViewportArea);
+    };
+
+    const observer = new IntersectionObserver(scheduleViewportUpdate, {
+      threshold: [0, 0.15, 0.35, 0.55, 0.75],
+      rootMargin: '-96px 0px -104px 0px',
+    });
+
+    sectionEntries.forEach(({ node }) => observer.observe(node));
+    window.addEventListener('resize', scheduleViewportUpdate);
+    scheduleViewportUpdate();
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', scheduleViewportUpdate);
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
+    };
+  }, [searchQuery, sortedGroups]);
+
+  const activeViewportGroup = !searchQuery
+    ? sortedGroups.find((group) => group.key === activeViewportAreaKey && group.areaId)
+    : null;
+
+  const handleFloatingAdd = () => {
+    navigate('/add', {
+      state: activeViewportGroup?.areaId
+        ? { preSelectedArea: activeViewportGroup.areaId }
+        : undefined,
+    });
+  };
+
+  const floatingAddLabel = activeViewportGroup ? `Novo em ${activeViewportGroup.name}` : 'Novo';
 
   const closeQuantityDialog = () => {
     setQuantityDialog({ open: false, product: null, initialQuantity: '1' });
@@ -468,7 +553,7 @@ export default function Catalog() {
   };
 
   return (
-    <div style={{ paddingBottom: '80px' }}>
+    <div style={{ paddingBottom: '144px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
         <h2 style={{ fontSize: '1.5rem' }}>Meu Catálogo</h2>
         <Link to="/add" className="btn btn-primary" style={{ padding: '8px 16px', fontSize: '0.875rem' }}>
@@ -532,6 +617,7 @@ export default function Catalog() {
                 showDragHint={!searchQuery}
                 isTargeted={!!activeDragProduct && overAreaKey === group.key}
                 onCreateHere={() => navigate('/add', { state: { preSelectedArea: group.areaId } })}
+                registerSection={registerGroupSection}
               >
                 <SortableContext items={group.items.map((product) => product.id)} strategy={verticalListSortingStrategy}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -569,6 +655,37 @@ export default function Catalog() {
         }}>
           {toastMsg}
         </div>
+      )}
+
+      {products.length > 0 && (
+        <button
+          type="button"
+          onClick={handleFloatingAdd}
+          aria-label={activeViewportGroup ? `Novo produto em ${activeViewportGroup.name}` : 'Novo produto'}
+          style={{
+            position: 'fixed',
+            right: '16px',
+            bottom: '24px',
+            zIndex: 950,
+            border: 'none',
+            borderRadius: '999px',
+            background: 'var(--primary)',
+            color: 'white',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            padding: '14px 18px',
+            boxShadow: 'var(--shadow-lg)',
+            fontWeight: 700,
+            cursor: 'pointer',
+            maxWidth: 'min(280px, calc(100vw - 32px))',
+          }}
+        >
+          <Plus size={20} />
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {floatingAddLabel}
+          </span>
+        </button>
       )}
 
       <QuantityPickerModal
