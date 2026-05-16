@@ -1,22 +1,205 @@
 import { startTransition, useState, useEffect, useCallback } from 'react';
+import { DndContext, DragOverlay, PointerSensor, closestCenter, useDroppable, useSensor, useSensors } from '@dnd-kit/core';
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { supabase } from './supabase';
 import { useAuth } from './AuthContext';
 import { usePlace } from './PlaceContext';
-import { Plus, Search, ArrowUp, ArrowDown, Edit2, Trash2, Mic, MicOff } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, Mic, MicOff, GripVertical } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import QuantityPickerModal from './QuantityPickerModal';
 import { buildProductInsights, getSortedProductMatches } from './productDiscovery';
 import useSpeechRecognition, { capitalizeFirst } from './useSpeechRecognition';
+
+function getAreaKey(areaId) {
+  return areaId ?? '__no_area__';
+}
+
+function CatalogDragPreview({ product }) {
+  if (!product) return null;
+
+  return (
+    <div
+      className="card"
+      style={{
+        marginBottom: 0,
+        padding: '10px 14px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px',
+        width: 'min(480px, calc(100vw - 32px))',
+        boxShadow: 'var(--shadow-lg)',
+        border: '1px solid rgba(79, 70, 229, 0.28)',
+        background: 'var(--surface)',
+      }}
+    >
+      <div style={{ padding: '8px', borderRadius: '8px', background: 'rgba(79, 70, 229, 0.08)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <GripVertical size={18} />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 600 }}>{product.name}</div>
+      </div>
+    </div>
+  );
+}
+
+function DroppableCatalogGroup({ group, showDragHint, isTargeted, onCreateHere, children }) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: `area-drop-${group.key}`,
+    data: {
+      type: 'area',
+      areaId: group.areaId,
+      areaKey: group.key,
+      areaName: group.name,
+    },
+  });
+
+  const highlighted = isTargeted || isOver;
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        borderRadius: '18px',
+        padding: '8px',
+        margin: '-8px',
+        background: highlighted ? 'rgba(79, 70, 229, 0.06)' : 'transparent',
+        boxShadow: highlighted ? 'inset 0 0 0 1px rgba(79, 70, 229, 0.18)' : 'none',
+        transition: 'background-color 0.18s ease, box-shadow 0.18s ease',
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+        <div>
+          <h3 style={{ fontSize: '1.125rem', color: highlighted ? 'var(--primary-hover)' : 'var(--primary)', margin: 0 }}>
+            {group.name}
+          </h3>
+          {showDragHint && (
+            <p style={{ marginTop: '4px', fontSize: '0.8rem', color: highlighted ? 'var(--primary)' : 'var(--text-muted)' }}>
+              {highlighted ? 'Solte aqui para mover este produto.' : 'Arraste pela alça para reordenar ou mudar de corredor.'}
+            </p>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={onCreateHere}
+          style={{ background: 'var(--primary)', border: 'none', color: 'white', borderRadius: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '4px 10px', gap: '4px', fontSize: '0.75rem', fontWeight: 600 }}
+        >
+          <Plus size={14} /> Novo aqui
+        </button>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function SortableCatalogItem({ product, areaName, dragEnabled, onEdit, onDelete, onAddToList }) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: product.id,
+    data: {
+      areaName,
+      areaId: product.area_id ?? null,
+      areaKey: getAreaKey(product.area_id),
+      type: 'item',
+    },
+    disabled: !dragEnabled,
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className="card"
+      style={{
+        marginBottom: 0,
+        padding: '8px 12px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px',
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.85 : 1,
+        boxShadow: isDragging ? 'var(--shadow-md)' : 'var(--shadow-sm)',
+        border: isDragging ? '1px solid rgba(79, 70, 229, 0.24)' : '1px solid var(--border)',
+      }}
+    >
+      {dragEnabled && (
+        <button
+          type="button"
+          aria-label={`Arrastar ${product.name}`}
+          title="Arrastar para reordenar"
+          {...attributes}
+          {...listeners}
+          style={{
+            background: 'var(--background)',
+            border: 'none',
+            cursor: 'grab',
+            padding: '8px',
+            borderRadius: '8px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            touchAction: 'none',
+            color: 'var(--primary)',
+            flexShrink: 0,
+          }}
+        >
+          <GripVertical size={18} />
+        </button>
+      )}
+
+      {/* [IMG-OFF] Thumbnail desabilitada para economizar Storage.
+      {product.thumbnail_url ? (
+        <img src={product.thumbnail_url} alt="" style={{ width: 40, height: 40, borderRadius: 6, objectFit: 'cover' }} />
+      ) : (
+        <div style={{ width: 40, height: 40, borderRadius: 6, backgroundColor: 'var(--background)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <ImageIcon size={20} color="var(--text-muted)" />
+        </div>
+      )}
+      */}
+
+      <div style={{ flex: 1 }}>
+        <div style={{ fontWeight: 500 }}>{product.name}</div>
+      </div>
+
+      <div style={{ display: 'flex', gap: '4px' }}>
+        <button type="button" onClick={() => onEdit(product)} className="btn" style={{ padding: '8px', backgroundColor: 'transparent', color: 'var(--primary)' }}>
+          <Edit2 size={18} />
+        </button>
+        <button type="button" onClick={() => onDelete(product)} className="btn" style={{ padding: '8px', backgroundColor: 'transparent', color: 'var(--danger)' }}>
+          <Trash2 size={18} />
+        </button>
+      </div>
+
+      <button type="button" onClick={() => onAddToList(product)} className="btn" style={{ padding: '8px', backgroundColor: 'var(--background)', color: 'var(--primary)' }}>
+        <Plus size={20} />
+      </button>
+    </div>
+  );
+}
 
 export default function Catalog() {
   const { user } = useAuth();
   const { currentPlaceId } = usePlace();
   const navigate = useNavigate();
   const [products, setProducts] = useState([]);
+  const [areas, setAreas] = useState([]);
   const [productInsights, setProductInsights] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
   const [toastMsg, setToastMsg] = useState('');
   const [quantityDialog, setQuantityDialog] = useState({ open: false, product: null, initialQuantity: '1' });
+  const [activeDragProduct, setActiveDragProduct] = useState(null);
+  const [overAreaKey, setOverAreaKey] = useState(null);
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 6 },
+    }),
+  );
 
   // Reconhecimento de voz para busca no catálogo
   const {
@@ -57,17 +240,25 @@ export default function Catalog() {
   };
 
   const loadCatalog = useCallback(async () => {
-    const { data } = await supabase
+    const [{ data }, { data: areaRows }] = await Promise.all([
+      supabase
       .from('products')
       .select('*, area:areas(name, order_index)')
       .eq('place_id', currentPlaceId)
       .order('order_index', { ascending: true })
-      .order('name', { ascending: true });
+      .order('name', { ascending: true }),
+      supabase
+        .from('areas')
+        .select('id, name, order_index')
+        .eq('place_id', currentPlaceId)
+        .order('order_index', { ascending: true }),
+    ]);
 
     if (!data) return;
 
     startTransition(() => {
       setProducts(data);
+      setAreas(areaRows || []);
     });
 
     const productIds = data.map((product) => product.id);
@@ -97,16 +288,23 @@ export default function Catalog() {
     ? getSortedProductMatches(products, searchQuery, productInsights)
     : products;
 
-  const groupedProducts = filteredProducts.reduce((acc, p) => {
-    const areaName = p.area?.name || 'Sem Corredor';
-    const areaId = p.area_id;
-    const orderIndex = p.area?.order_index ?? 999;
-    if (!acc[areaName]) acc[areaName] = { order: orderIndex, areaId: areaId, items: [] };
-    acc[areaName].items.push(p);
+  const areasById = areas.reduce((acc, area) => {
+    acc[area.id] = area;
     return acc;
   }, {});
 
-  const sortedAreas = Object.keys(groupedProducts).sort((a, b) => groupedProducts[a].order - groupedProducts[b].order);
+  const groupedProducts = filteredProducts.reduce((acc, p) => {
+    const areaId = p.area_id ?? null;
+    const areaKey = getAreaKey(areaId);
+    const areaMeta = areaId ? areasById[areaId] : null;
+    const areaName = areaMeta?.name || 'Sem Corredor';
+    const orderIndex = areaMeta?.order_index ?? 999;
+    if (!acc[areaKey]) acc[areaKey] = { key: areaKey, name: areaName, order: orderIndex, areaId, items: [] };
+    acc[areaKey].items.push(p);
+    return acc;
+  }, {});
+
+  const sortedGroups = Object.values(groupedProducts).sort((a, b) => a.order - b.order);
 
   const closeQuantityDialog = () => {
     setQuantityDialog({ open: false, product: null, initialQuantity: '1' });
@@ -169,45 +367,104 @@ export default function Catalog() {
     }
   };
 
-  const moveProduct = async (areaName, index, direction) => {
-    const areaItems = groupedProducts[areaName].items;
-    if ((direction === -1 && index === 0) || (direction === 1 && index === areaItems.length - 1)) return;
+  const saveProductOrder = async (orderedAreaItems, areaId) => {
+    const reorderedWithIndex = orderedAreaItems.map((item, index) => ({
+      ...item,
+      order_index: index * 10,
+      area_id: areaId,
+    }));
 
-    const targetIndex = index + direction;
+    const reorderedById = new Map(reorderedWithIndex.map((item) => [item.id, item]));
+    setProducts((currentProducts) => currentProducts.map((product) => reorderedById.get(product.id) || product));
 
-    const newProducts = [...products];
-    const p1 = areaItems[index];
-    const p2 = areaItems[targetIndex];
-
-    const idx1 = newProducts.findIndex(p => p.id === p1.id);
-    const idx2 = newProducts.findIndex(p => p.id === p2.id);
-
-    if (p1.order_index === p2.order_index || p1.order_index === null) {
-        areaItems.forEach((item, i) => {
-            item.order_index = i * 10;
-        });
-    }
-
-    const tempOrder = p1.order_index;
-    p1.order_index = p2.order_index;
-    p2.order_index = tempOrder;
-
-    newProducts[idx1] = p1;
-    newProducts[idx2] = p2;
-
-    newProducts.sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
-    setProducts([...newProducts]);
-
-    const updates = areaItems.map((item) => ({
+    const updates = reorderedWithIndex.map((item) => ({
       id: item.id,
       place_id: item.place_id,
-      area_id: item.area_id,
+      area_id: areaId,
       name: item.name,
       thumbnail_url: item.thumbnail_url,
-      order_index: item.order_index
+      order_index: item.order_index,
     }));
 
     await supabase.from('products').upsert(updates);
+  };
+
+  const showToast = (message) => {
+    setToastMsg(message);
+    setTimeout(() => setToastMsg(''), 2500);
+  };
+
+  const handleDragStart = (event) => {
+    const product = products.find((item) => item.id === event.active.id) || null;
+    setActiveDragProduct(product);
+    setOverAreaKey(event.active.data.current?.areaKey || null);
+  };
+
+  const handleDragOver = (event) => {
+    const nextAreaKey = event.over?.data.current?.areaKey || null;
+    setOverAreaKey(nextAreaKey);
+  };
+
+  const resetDragState = () => {
+    setActiveDragProduct(null);
+    setOverAreaKey(null);
+  };
+
+  const handleDragEnd = async (event) => {
+    if (searchQuery) return;
+
+    const { active, over } = event;
+    if (!over) {
+      resetDragState();
+      return;
+    }
+
+    const activeAreaId = active.data.current?.areaId ?? null;
+    const activeAreaKey = active.data.current?.areaKey ?? getAreaKey(activeAreaId);
+    const activeAreaName = active.data.current?.areaName || 'Sem Corredor';
+    const overAreaId = over.data.current?.areaId ?? null;
+    const overAreaKey = over.data.current?.areaKey ?? getAreaKey(overAreaId);
+    const overAreaName = over.data.current?.areaName || 'Sem Corredor';
+
+    if (active.id === over.id && activeAreaKey === overAreaKey) {
+      resetDragState();
+      return;
+    }
+
+    const sourceItems = products.filter((product) => getAreaKey(product.area_id ?? null) === activeAreaKey);
+    const oldIndex = sourceItems.findIndex((item) => item.id === active.id);
+    if (oldIndex === -1) {
+      resetDragState();
+      return;
+    }
+
+    if (activeAreaKey === overAreaKey) {
+      const newIndex = sourceItems.findIndex((item) => item.id === over.id);
+      if (newIndex === -1) {
+        resetDragState();
+        return;
+      }
+
+      const reordered = arrayMove(sourceItems, oldIndex, newIndex);
+      await saveProductOrder(reordered, activeAreaId);
+      resetDragState();
+      return;
+    }
+
+    const destinationItems = products.filter((product) => getAreaKey(product.area_id ?? null) === overAreaKey);
+    const movedItem = { ...sourceItems[oldIndex], area_id: overAreaId };
+    const nextSourceItems = sourceItems.filter((item) => item.id !== active.id);
+    const nextDestinationItems = [...destinationItems];
+    const insertionIndex = over.data.current?.type === 'item'
+      ? destinationItems.findIndex((item) => item.id === over.id)
+      : destinationItems.length;
+
+    nextDestinationItems.splice(insertionIndex < 0 ? destinationItems.length : insertionIndex, 0, movedItem);
+
+    await saveProductOrder(nextSourceItems, activeAreaId);
+    await saveProductOrder(nextDestinationItems, overAreaId);
+    showToast(`✓ Movido de ${activeAreaName} para ${overAreaName}`);
+    resetDragState();
   };
 
   return (
@@ -254,70 +511,51 @@ export default function Catalog() {
           <p>Você ainda não cadastrou nenhum produto.</p>
           <p style={{ fontSize: '0.875rem', marginTop: '8px' }}>Cadastre os produtos que você consome clicando em "Novo".</p>
         </div>
-      ) : sortedAreas.length === 0 ? (
+      ) : sortedGroups.length === 0 ? (
         <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: '48px' }}>
           <p>Nenhum produto encontrado.</p>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          {sortedAreas.map(areaName => (
-            <div key={areaName}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                <h3 style={{ fontSize: '1.125rem', color: 'var(--primary)', margin: 0 }}>{areaName}</h3>
-                <button
-                  onClick={() => navigate('/add', { state: { preSelectedArea: groupedProducts[areaName].areaId } })}
-                  style={{ background: 'var(--primary)', border: 'none', color: 'white', borderRadius: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '4px 10px', gap: '4px', fontSize: '0.75rem', fontWeight: 600 }}
-                >
-                  <Plus size={14} /> Novo aqui
-                </button>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {groupedProducts[areaName].items.map((p, index) => (
-                  <div key={p.id} className="card" style={{ marginBottom: 0, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-
-                    {!searchQuery && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', padding: '2px', background: 'var(--background)', borderRadius: '6px' }}>
-                        <button onClick={() => moveProduct(areaName, index, -1)} disabled={index === 0} style={{ background: 'none', border: 'none', cursor: index === 0 ? 'default' : 'pointer', padding: '2px', opacity: index === 0 ? 0.3 : 1, display: 'flex' }}>
-                          <ArrowUp size={16} color="var(--primary)" />
-                        </button>
-                        <button onClick={() => moveProduct(areaName, index, 1)} disabled={index === groupedProducts[areaName].items.length - 1} style={{ background: 'none', border: 'none', cursor: index === groupedProducts[areaName].items.length - 1 ? 'default' : 'pointer', padding: '2px', opacity: index === groupedProducts[areaName].items.length - 1 ? 0.3 : 1, display: 'flex' }}>
-                          <ArrowDown size={16} color="var(--primary)" />
-                        </button>
-                      </div>
-                    )}
-
-                    {/* [IMG-OFF] Thumbnail desabilitada para economizar Storage.
-                    {p.thumbnail_url ? (
-                      <img src={p.thumbnail_url} alt="" style={{ width: 40, height: 40, borderRadius: 6, objectFit: 'cover' }} />
-                    ) : (
-                      <div style={{ width: 40, height: 40, borderRadius: 6, backgroundColor: 'var(--background)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <ImageIcon size={20} color="var(--text-muted)" />
-                      </div>
-                    )}
-                    */}
-
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 500 }}>{p.name}</div>
-                    </div>
-
-                    <div style={{ display: 'flex', gap: '4px' }}>
-                      <button onClick={() => handleEditProduct(p)} className="btn" style={{ padding: '8px', backgroundColor: 'transparent', color: 'var(--primary)' }}>
-                        <Edit2 size={18} />
-                      </button>
-                      <button onClick={() => handleDeleteProduct(p)} className="btn" style={{ padding: '8px', backgroundColor: 'transparent', color: 'var(--danger)' }}>
-                        <Trash2 size={18} />
-                      </button>
-                    </div>
-
-                    <button onClick={() => openQuantityDialog(p)} className="btn" style={{ padding: '8px', backgroundColor: 'var(--background)', color: 'var(--primary)' }}>
-                      <Plus size={20} />
-                    </button>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={handleDragStart}
+          onDragOver={handleDragOver}
+          onDragEnd={handleDragEnd}
+          onDragCancel={resetDragState}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            {sortedGroups.map((group) => (
+              <DroppableCatalogGroup
+                key={group.key}
+                group={group}
+                showDragHint={!searchQuery}
+                isTargeted={!!activeDragProduct && overAreaKey === group.key}
+                onCreateHere={() => navigate('/add', { state: { preSelectedArea: group.areaId } })}
+              >
+                <SortableContext items={group.items.map((product) => product.id)} strategy={verticalListSortingStrategy}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {group.items.map((product) => (
+                      <SortableCatalogItem
+                        key={product.id}
+                        product={product}
+                        areaName={group.name}
+                        dragEnabled={!searchQuery}
+                        onEdit={handleEditProduct}
+                        onDelete={handleDeleteProduct}
+                        onAddToList={openQuantityDialog}
+                      />
+                    ))}
                   </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
+                </SortableContext>
+              </DroppableCatalogGroup>
+            ))}
+          </div>
+
+          <DragOverlay>
+            <CatalogDragPreview product={activeDragProduct} />
+          </DragOverlay>
+        </DndContext>
       )}
 
       {toastMsg && (

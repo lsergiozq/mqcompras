@@ -1,13 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import { startTransition, useState, useEffect, useCallback } from 'react';
 import { supabase } from './supabase';
 import { useAuth } from './AuthContext';
 import { usePlace } from './PlaceContext';
 import { ArrowLeft, Mic, MicOff /*, Camera */ } from 'lucide-react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import useSpeechRecognition, { capitalizeFirst } from './useSpeechRecognition';
+import { normalizeSearchText } from './productDiscovery';
 // import { compressImage } from './imageUtils'; // [IMG-OFF] reativar quando voltar com upload de imagens
 
 export default function AddProduct() {
+  const imageCaptureEnabled = false;
   const { user } = useAuth();
   const { currentPlaceId, places } = usePlace();
   const navigate = useNavigate();
@@ -41,20 +43,39 @@ export default function AddProduct() {
     reset: resetVoice,
   } = useSpeechRecognition({ lang: 'pt-BR' });
 
+  const loadAreas = useCallback(async () => {
+    const { data } = await supabase
+      .from('areas')
+      .select('*')
+      .eq('place_id', currentPlaceId)
+      .order('order_index');
+
+    startTransition(() => {
+      setAreas(data || []);
+      if (data && data.length > 0 && !editingProduct && !preSelectedArea) {
+        setSelectedArea(data[0].id);
+      }
+    });
+  }, [currentPlaceId, editingProduct, preSelectedArea]);
+
   useEffect(() => {
     if (user && currentPlaceId) loadAreas();
-  }, [user, currentPlaceId]);
+  }, [user, currentPlaceId, loadAreas]);
 
   useEffect(() => {
     if (editingProduct && areas.length > 0) {
-      setName(editingProduct.name);
-      setSelectedArea(editingProduct.area_id);
+      startTransition(() => {
+        setName(editingProduct.name);
+        setSelectedArea(editingProduct.area_id);
+      });
       // [IMG-OFF] desabilitado para não exibir/atualizar imagens enquanto a captura está off.
       // if (editingProduct.thumbnail_url) {
       //   setImagePreview(editingProduct.thumbnail_url);
       // }
     } else if (preSelectedArea && areas.length > 0) {
-      setSelectedArea(preSelectedArea);
+      startTransition(() => {
+        setSelectedArea(preSelectedArea);
+      });
     }
   }, [editingProduct, preSelectedArea, areas]);
 
@@ -63,7 +84,9 @@ export default function AddProduct() {
   // Só dispara uma vez, quando suggestedName chega, e só se não está editando.
   useEffect(() => {
     if (suggestedName && !editingProduct) {
-      setName(suggestedName);
+      startTransition(() => {
+        setName(suggestedName);
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [suggestedName]);
@@ -73,7 +96,9 @@ export default function AddProduct() {
   useEffect(() => {
     if (listening) return;
     if (!transcript) return;
-    setName(capitalizeFirst(transcript));
+    startTransition(() => {
+      setName(capitalizeFirst(transcript));
+    });
     resetVoice();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listening, transcript]);
@@ -96,18 +121,6 @@ export default function AddProduct() {
       stopVoice();
     } else {
       startVoice();
-    }
-  };
-
-  const loadAreas = async () => {
-    const { data } = await supabase
-      .from('areas')
-      .select('*')
-      .eq('place_id', currentPlaceId)
-      .order('order_index');
-    setAreas(data || []);
-    if (data && data.length > 0 && !editingProduct && !preSelectedArea) {
-      setSelectedArea(data[0].id);
     }
   };
 
@@ -136,6 +149,32 @@ export default function AddProduct() {
     setLoading(true);
 
     try {
+      const trimmedName = name.trim();
+      const normalizedName = normalizeSearchText(trimmedName);
+      const placesToCheck = editingProduct ? [currentPlaceId] : [currentPlaceId, ...alsoAddToPlaces];
+      const uniquePlacesToCheck = [...new Set(placesToCheck)];
+
+      const { data: existingProducts } = await supabase
+        .from('products')
+        .select('id, place_id, name')
+        .in('place_id', uniquePlacesToCheck);
+
+      const duplicatePlaceIds = new Set(
+        (existingProducts || [])
+          .filter((product) => product.id !== editingProduct?.id)
+          .filter((product) => normalizeSearchText(product.name) === normalizedName)
+          .map((product) => product.place_id),
+      );
+
+      if (duplicatePlaceIds.has(currentPlaceId)) {
+        alert('Já existe um produto com esse nome neste Local.');
+        setLoading(false);
+        return;
+      }
+
+      const validAlsoAddPlaces = alsoAddToPlaces.filter((placeId) => !duplicatePlaceIds.has(placeId));
+      const skippedAlsoAddCount = alsoAddToPlaces.length - validAlsoAddPlaces.length;
+
       // [IMG-OFF] mantém qualquer thumbnail já existente, mas não envia novas imagens.
       let thumbnailUrl = editingProduct?.thumbnail_url || null;
 
@@ -153,7 +192,7 @@ export default function AddProduct() {
       if (editingProduct) {
         const { error: productError } = await supabase.from('products').update({
           area_id: selectedArea || null,
-          name,
+          name: trimmedName,
           thumbnail_url: thumbnailUrl
         }).eq('id', editingProduct.id);
 
@@ -167,7 +206,7 @@ export default function AddProduct() {
         const { error: productError } = await supabase.from('products').insert([{
           place_id: currentPlaceId,
           area_id: selectedArea || null,
-          name: name.trim(),
+          name: trimmedName,
           thumbnail_url: thumbnailUrl,
           order_index: newIndex
         }]);
@@ -175,21 +214,24 @@ export default function AddProduct() {
         if (productError) throw productError;
 
         // Mitigante 2: também adicionar a outros Locais selecionados (sem area_id, sem reuso da imagem na pasta de outro Local — a URL pública vale igual)
-        if (alsoAddToPlaces.length > 0) {
-          const extraInserts = alsoAddToPlaces.map(pid => ({
+        if (validAlsoAddPlaces.length > 0) {
+          const extraInserts = validAlsoAddPlaces.map(pid => ({
             place_id: pid,
             area_id: null, // o outro Local pode ter corredores diferentes; usuário ajusta depois
-            name: name.trim(),
+            name: trimmedName,
             thumbnail_url: thumbnailUrl,
             order_index: 0
           }));
           await supabase.from('products').insert(extraInserts);
         }
 
-        const extraMsg = alsoAddToPlaces.length > 0
-          ? ` (também em ${alsoAddToPlaces.length} ${alsoAddToPlaces.length === 1 ? 'outro Local' : 'outros Locais'})`
+        const extraMsg = validAlsoAddPlaces.length > 0
+          ? ` (também em ${validAlsoAddPlaces.length} ${validAlsoAddPlaces.length === 1 ? 'outro Local' : 'outros Locais'})`
           : '';
-        setSuccessMsg(`"${name}" foi salvo!${extraMsg}`);
+        const skippedMsg = skippedAlsoAddCount > 0
+          ? ` (${skippedAlsoAddCount} ${skippedAlsoAddCount === 1 ? 'Local já tinha esse produto' : 'Locais já tinham esse produto'})`
+          : '';
+        setSuccessMsg(`"${trimmedName}" foi salvo!${extraMsg}${skippedMsg}`);
         setName('');
         // [IMG-OFF]
         // setImageFile(null);
@@ -260,8 +302,8 @@ export default function AddProduct() {
         </div>
 
         {/* [IMG-OFF] Card de foto desabilitado para controlar custo do Supabase Storage.
-            Para reativar, trocar `false` por `true` e descomentar os imports/states/handler de imagem acima. */}
-        {false && (
+          Para reativar, trocar `imageCaptureEnabled` para `true` e descomentar os imports/states/handler de imagem acima. */}
+        {imageCaptureEnabled && (
           <div className="card" style={{ marginBottom: 0 }}>
             <label style={{ display: 'block', marginBottom: '8px', fontWeight: 500 }}>Foto (opcional)</label>
             <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '12px' }}>
