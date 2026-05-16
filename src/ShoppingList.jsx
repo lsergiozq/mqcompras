@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { startTransition, useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import { useAuth } from './AuthContext';
 import { usePlace } from './PlaceContext';
@@ -97,7 +97,9 @@ export default function ShoppingList() {
       }
     }
 
-    setVoiceModal({ open: true, transcript, matched, unmatched });
+    startTransition(() => {
+      setVoiceModal({ open: true, transcript, matched, unmatched });
+    });
     resetVoice();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listening, transcript]);
@@ -289,7 +291,7 @@ export default function ShoppingList() {
         </div>
       )}
 
-      <div style={{ position: 'relative', marginBottom: '24px', zIndex: 20 }}>
+      <div style={{ position: 'relative', marginBottom: '24px', zIndex: 5 }}>
         <div style={{ display: 'flex', gap: '8px' }}>
           <div style={{ position: 'relative', flex: 1 }}>
             <Search size={20} style={{ position: 'absolute', left: '12px', top: '12px', color: 'var(--text-muted)' }} />
@@ -327,7 +329,7 @@ export default function ShoppingList() {
         </div>
 
         {showCatalogDropdown && (
-          <div className="card" style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: '8px', padding: '8px 0', zIndex: 100 }}>
+          <div className="card" style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: '8px', padding: '8px 0', zIndex: 6 }}>
             {filteredCatalog.map(p => (
               <div
                 key={p.id}

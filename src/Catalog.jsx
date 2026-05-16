@@ -33,7 +33,9 @@ export default function Catalog() {
   useEffect(() => {
     if (listening) return;
     if (!transcript) return;
-    setSearchQuery(capitalizeFirst(transcript));
+    startTransition(() => {
+      setSearchQuery(capitalizeFirst(transcript));
+    });
     resetVoice();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listening, transcript]);
@@ -221,7 +223,7 @@ export default function Catalog() {
         <Search size={20} style={{ position: 'absolute', left: '12px', top: '12px', color: 'var(--text-muted)' }} />
         <input
           className="input-field"
-          placeholder={listening ? 'Ouvindo... fale o nome' : 'Buscar nos meus produtos...'}
+          placeholder={listening ? 'Ouvindo... fale o nome' : 'Buscar nos meus catálogos...'}
           style={{ paddingLeft: '40px', paddingRight: voiceSupported ? '46px' : '14px' }}
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
@@ -298,16 +300,14 @@ export default function Catalog() {
                       <div style={{ fontWeight: 500 }}>{p.name}</div>
                     </div>
 
-                    {!searchQuery && (
-                      <div style={{ display: 'flex', gap: '4px' }}>
-                        <button onClick={() => handleEditProduct(p)} className="btn" style={{ padding: '8px', backgroundColor: 'transparent', color: 'var(--primary)' }}>
-                          <Edit2 size={18} />
-                        </button>
-                        <button onClick={() => handleDeleteProduct(p)} className="btn" style={{ padding: '8px', backgroundColor: 'transparent', color: 'var(--danger)' }}>
-                          <Trash2 size={18} />
-                        </button>
-                      </div>
-                    )}
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                      <button onClick={() => handleEditProduct(p)} className="btn" style={{ padding: '8px', backgroundColor: 'transparent', color: 'var(--primary)' }}>
+                        <Edit2 size={18} />
+                      </button>
+                      <button onClick={() => handleDeleteProduct(p)} className="btn" style={{ padding: '8px', backgroundColor: 'transparent', color: 'var(--danger)' }}>
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
 
                     <button onClick={() => openQuantityDialog(p)} className="btn" style={{ padding: '8px', backgroundColor: 'var(--background)', color: 'var(--primary)' }}>
                       <Plus size={20} />
