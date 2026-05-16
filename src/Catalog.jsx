@@ -1,4 +1,4 @@
-import { startTransition, useState, useEffect, useCallback } from 'react';
+import { startTransition, useState, useEffect, useCallback, useRef } from 'react';
 import { DndContext, DragOverlay, PointerSensor, closestCenter, useDroppable, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -6,7 +6,7 @@ import { supabase } from './supabase';
 import { useAuth } from './AuthContext';
 import { usePlace } from './PlaceContext';
 import { Plus, Search, Edit2, Trash2, Mic, MicOff, GripVertical } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import QuantityPickerModal from './QuantityPickerModal';
 import { buildProductInsights, getSortedProductMatches } from './productDiscovery';
 import useSpeechRecognition, { capitalizeFirst } from './useSpeechRecognition';
@@ -43,7 +43,7 @@ function CatalogDragPreview({ product }) {
   );
 }
 
-function DroppableCatalogGroup({ group, showDragHint, isTargeted, onCreateHere, children }) {
+function DroppableCatalogGroup({ group, showDragHint, isTargeted, onCreateHere, registerSection, children }) {
   const { setNodeRef, isOver } = useDroppable({
     id: `area-drop-${group.key}`,
     data: {
@@ -58,7 +58,10 @@ function DroppableCatalogGroup({ group, showDragHint, isTargeted, onCreateHere, 
 
   return (
     <div
-      ref={setNodeRef}
+      ref={(node) => {
+        setNodeRef(node);
+        registerSection(group.key, node);
+      }}
       style={{
         borderRadius: '18px',
         padding: '8px',
@@ -192,10 +195,12 @@ export default function Catalog() {
   const [productInsights, setProductInsights] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
   const [isHeaderElevated, setIsHeaderElevated] = useState(false);
+  const [activeViewportAreaKey, setActiveViewportAreaKey] = useState(null);
   const [toastMsg, setToastMsg] = useState('');
   const [quantityDialog, setQuantityDialog] = useState({ open: false, product: null, initialQuantity: '1' });
   const [activeDragProduct, setActiveDragProduct] = useState(null);
   const [overAreaKey, setOverAreaKey] = useState(null);
+  const groupSectionRefs = useRef(new Map());
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 6 },
@@ -327,6 +332,89 @@ export default function Catalog() {
   });
 
   const sortedGroups = Object.values(groupedProducts).sort((a, b) => a.order - b.order);
+
+  const registerGroupSection = useCallback((groupKey, node) => {
+    if (node) {
+      groupSectionRefs.current.set(groupKey, node);
+      return;
+    }
+
+    groupSectionRefs.current.delete(groupKey);
+  }, []);
+
+  useEffect(() => {
+    if (searchQuery || sortedGroups.length === 0) {
+      startTransition(() => {
+        setActiveViewportAreaKey(null);
+      });
+      return undefined;
+    }
+
+    const sectionEntries = sortedGroups
+      .map((group) => ({ key: group.key, node: groupSectionRefs.current.get(group.key) }))
+      .filter((entry) => entry.node instanceof HTMLElement);
+
+    if (sectionEntries.length === 0) return undefined;
+
+    let frameId = null;
+
+    const updateActiveViewportArea = () => {
+      const viewportTop = 104;
+      const viewportBottom = window.innerHeight - 96;
+      let bestKey = null;
+      let bestVisibleHeight = 0;
+      let bestTop = Number.POSITIVE_INFINITY;
+
+      sectionEntries.forEach(({ key, node }) => {
+        const rect = node.getBoundingClientRect();
+        const visibleHeight = Math.min(rect.bottom, viewportBottom) - Math.max(rect.top, viewportTop);
+
+        if (visibleHeight <= 0) return;
+
+        if (visibleHeight > bestVisibleHeight || (visibleHeight === bestVisibleHeight && rect.top < bestTop)) {
+          bestKey = key;
+          bestVisibleHeight = visibleHeight;
+          bestTop = rect.top;
+        }
+      });
+
+      startTransition(() => {
+        setActiveViewportAreaKey((currentKey) => currentKey === bestKey ? currentKey : bestKey);
+      });
+    };
+
+    const scheduleViewportUpdate = () => {
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(updateActiveViewportArea);
+    };
+
+    const observer = new IntersectionObserver(scheduleViewportUpdate, {
+      threshold: [0, 0.15, 0.35, 0.55, 0.75],
+      rootMargin: '-96px 0px -96px 0px',
+    });
+
+    sectionEntries.forEach(({ node }) => observer.observe(node));
+    window.addEventListener('resize', scheduleViewportUpdate);
+    scheduleViewportUpdate();
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', scheduleViewportUpdate);
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
+    };
+  }, [searchQuery, sortedGroups]);
+
+  const activeViewportGroup = !searchQuery
+    ? sortedGroups.find((group) => group.key === activeViewportAreaKey && group.areaId)
+    : null;
+
+  const handleHeaderAdd = () => {
+    navigate('/add', {
+      state: activeViewportGroup?.areaId
+        ? { preSelectedArea: activeViewportGroup.areaId }
+        : undefined,
+    });
+  };
 
   const closeQuantityDialog = () => {
     setQuantityDialog({ open: false, product: null, initialQuantity: '1' });
@@ -508,10 +596,32 @@ export default function Catalog() {
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
-          <h2 style={{ fontSize: '1.5rem', margin: 0 }}>Meu Catálogo</h2>
-          <Link to="/add" className="btn btn-primary" style={{ padding: '8px 16px', fontSize: '0.875rem', flexShrink: 0 }}>
-            <Plus size={18} /> Novo
-          </Link>
+          <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <h2 style={{ fontSize: '1.5rem', margin: 0 }}>Meu Catálogo</h2>
+            {activeViewportGroup && (
+              <span
+                style={{
+                  fontSize: '0.78rem',
+                  color: 'var(--text-muted)',
+                  fontWeight: 600,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                Novo produto em {activeViewportGroup.name}
+              </span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={handleHeaderAdd}
+            title={activeViewportGroup ? `Novo em ${activeViewportGroup.name}` : 'Novo produto'}
+            className="btn btn-primary"
+            style={{ padding: '8px 16px', fontSize: '0.875rem', flexShrink: 0 }}
+          >
+            <Plus size={18} /> {activeViewportGroup ? 'Novo aqui' : 'Novo'}
+          </button>
         </div>
       </div>
 
@@ -571,6 +681,7 @@ export default function Catalog() {
                 showDragHint={!searchQuery}
                 isTargeted={!!activeDragProduct && overAreaKey === group.key}
                 onCreateHere={() => navigate('/add', { state: { preSelectedArea: group.areaId } })}
+                registerSection={registerGroupSection}
               >
                 <SortableContext items={group.items.map((product) => product.id)} strategy={verticalListSortingStrategy}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
