@@ -156,16 +156,6 @@ function SortableCatalogItem({ product, areaName, dragEnabled, onEdit, onDelete,
         </button>
       )}
 
-      {/* [IMG-OFF] Thumbnail desabilitada para economizar Storage.
-      {product.thumbnail_url ? (
-        <img src={product.thumbnail_url} alt="" style={{ width: 40, height: 40, borderRadius: 6, objectFit: 'cover' }} />
-      ) : (
-        <div style={{ width: 40, height: 40, borderRadius: 6, backgroundColor: 'var(--background)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <ImageIcon size={20} color="var(--text-muted)" />
-        </div>
-      )}
-      */}
-
       <div style={{ flex: 1 }}>
         <div style={{ fontWeight: 500 }}>{product.name}</div>
       </div>
@@ -202,11 +192,12 @@ export default function Catalog() {
   const [overAreaKey, setOverAreaKey] = useState(null);
   const groupSectionRefs = useRef(new Map());
   // Fila de escritas no Supabase para evitar race condition em ordenações rápidas.
-  // Cada saveProductOrder é encadeado no .then() do anterior, garantindo ordem
-  // tanto local (estado) quanto remota (banco).
+  // Cada escrita é encadeada no .then() da anterior, garantindo ordem tanto
+  // local quanto remota.
   const writeQueueRef = useRef(Promise.resolve());
-  // Espelho do estado `products` para que cálculos de drag operem sempre sobre
-  // a versão mais recente, sem depender do closure do render anterior.
+  // Espelho do estado `products` para que handlers de drag em sequência rápida
+  // sempre operem sobre a versão MAIS RECENTE, sem depender do closure do render
+  // anterior nem do `data` congelado no useSortable.
   const productsRef = useRef([]);
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -214,7 +205,6 @@ export default function Catalog() {
     }),
   );
 
-  // Reconhecimento de voz para busca no catálogo
   const {
     supported: voiceSupported,
     listening,
@@ -225,7 +215,6 @@ export default function Catalog() {
     reset: resetVoice,
   } = useSpeechRecognition({ lang: 'pt-BR' });
 
-  // Quando o usuário termina de ditar, joga a fala (capitalizada) no campo de busca.
   useEffect(() => {
     if (listening) return;
     if (!transcript) return;
@@ -253,9 +242,7 @@ export default function Catalog() {
   };
 
   const loadCatalog = useCallback(async () => {
-    // Espera todas as escritas de ordenação pendentes terminarem antes de
-    // hidratar o estado, senão o reload pode sobrescrever a UI com uma versão
-    // antiga (a última escrita ainda nem chegou no banco).
+    // Espera escritas pendentes terminarem antes de hidratar o estado.
     await writeQueueRef.current.catch(() => {});
 
     const [{ data }, { data: areaRows }] = await Promise.all([
@@ -274,8 +261,6 @@ export default function Catalog() {
 
     if (!data) return;
 
-    // Sincroniza ref imediatamente para que handlers de drag chamados antes
-    // do próximo render já vejam a versão recém-carregada.
     productsRef.current = data;
     startTransition(() => {
       setProducts(data);
@@ -305,10 +290,7 @@ export default function Catalog() {
     if (user && currentPlaceId) loadCatalog();
   }, [user, currentPlaceId, loadCatalog]);
 
-  // Mantém productsRef sincronizado com o estado atual para que handlers
-  // assíncronos (drag em sequência rápida) sempre leiam a versão mais recente.
-  // O ref também é atualizado de forma síncrona em handleDragEnd e loadCatalog
-  // para cobrir o caso em que dois drags acontecem no mesmo "tick" do React.
+  // Mantém productsRef sincronizado com cada render.
   useEffect(() => {
     productsRef.current = products;
   }, [products]);
@@ -361,7 +343,6 @@ export default function Catalog() {
       groupSectionRefs.current.set(groupKey, node);
       return;
     }
-
     groupSectionRefs.current.delete(groupKey);
   }, []);
 
@@ -491,7 +472,7 @@ export default function Catalog() {
           const folderName = urlParts.pop();
           await supabase.storage.from('thumbnails').remove([`${folderName}/${fileName}`]);
         } catch {
-          // Melhor esforço: se falhar ao limpar o Storage, segue apagando o produto.
+          // Melhor esforço: se falhar, segue apagando o produto.
         }
       }
 
@@ -500,10 +481,7 @@ export default function Catalog() {
     }
   };
 
-  // Persiste a nova ordem de uma área. Recebe os itens já com order_index e
-  // area_id corretos (calculados em handleDragEnd). A escrita remota é
-  // serializada via writeQueueRef para garantir que duas ordenações rápidas
-  // em sequência não cheguem fora de ordem no Supabase.
+  // Persiste ordem de uma área. Escritas são serializadas via writeQueueRef.
   const enqueueProductOrderWrite = (orderedAreaItems, areaId) => {
     const updates = orderedAreaItems.map((item) => ({
       id: item.id,
@@ -528,13 +506,18 @@ export default function Catalog() {
   };
 
   const handleDragStart = (event) => {
-    const product = products.find((item) => item.id === event.active.id) || null;
+    const product = productsRef.current.find((item) => item.id === event.active.id) || null;
     setActiveDragProduct(product);
-    setOverAreaKey(event.active.data.current?.areaKey || null);
+    setOverAreaKey(product ? getAreaKey(product.area_id ?? null) : null);
   };
 
   const handleDragOver = (event) => {
-    const nextAreaKey = event.over?.data.current?.areaKey || null;
+    const overItem = event.over?.data.current?.type === 'item'
+      ? productsRef.current.find((item) => item.id === event.over.id)
+      : null;
+    const nextAreaKey = overItem
+      ? getAreaKey(overItem.area_id ?? null)
+      : (event.over?.data.current?.areaKey || null);
     setOverAreaKey(nextAreaKey);
   };
 
@@ -552,23 +535,50 @@ export default function Catalog() {
       return;
     }
 
-    const activeAreaId = active.data.current?.areaId ?? null;
-    const activeAreaKey = active.data.current?.areaKey ?? getAreaKey(activeAreaId);
-    const activeAreaName = active.data.current?.areaName || 'Sem Corredor';
-    const overAreaId = over.data.current?.areaId ?? null;
-    const overAreaKey = over.data.current?.areaKey ?? getAreaKey(overAreaId);
-    const overAreaName = over.data.current?.areaName || 'Sem Corredor';
+    // CRÍTICO: NÃO confiar em active.data.current.areaId/areaKey. Esse data é
+    // capturado quando o useSortable é montado, e fica STALE entre dois drags
+    // rápidos (o React pode ainda não ter re-renderizado o item após o primeiro
+    // setProducts). Sempre derivar a área atual do estado mais recente via
+    // productsRef.current + active.id.
+    const currentProducts = productsRef.current;
+    const activeProduct = currentProducts.find((item) => item.id === active.id);
+    if (!activeProduct) {
+      resetDragState();
+      return;
+    }
+
+    const activeAreaId = activeProduct.area_id ?? null;
+    const activeAreaKey = getAreaKey(activeAreaId);
+
+    // Determinar overAreaId: se over for um item, derivar do estado atual;
+    // se for uma área, usar o data (montado fresh a cada render).
     const overType = over.data.current?.type;
+    let overAreaId;
+
+    if (overType === 'item') {
+      const overTargetItem = currentProducts.find((item) => item.id === over.id);
+      if (!overTargetItem) {
+        resetDragState();
+        return;
+      }
+      overAreaId = overTargetItem.area_id ?? null;
+    } else {
+      overAreaId = over.data.current?.areaId ?? null;
+    }
+    const overAreaKey = getAreaKey(overAreaId);
+
+    const lookupAreaName = (areaId) => {
+      if (!areaId) return 'Sem Corredor';
+      const found = areas.find((a) => a.id === areaId);
+      return found?.name || 'Sem Corredor';
+    };
+    const activeAreaName = lookupAreaName(activeAreaId);
+    const overAreaName = lookupAreaName(overAreaId);
 
     if (active.id === over.id && activeAreaKey === overAreaKey) {
       resetDragState();
       return;
     }
-
-    // Sempre parte da versão MAIS RECENTE do estado, não do closure do render.
-    // Isso é o que evita que dois drags rápidos em sequência partam do mesmo
-    // snapshot e um deles "desfaça" o outro.
-    const currentProducts = productsRef.current;
 
     const sourceItems = currentProducts.filter(
       (product) => getAreaKey(product.area_id ?? null) === activeAreaKey,
@@ -580,8 +590,18 @@ export default function Catalog() {
     }
 
     if (activeAreaKey === overAreaKey) {
-      const newIndex = sourceItems.findIndex((item) => item.id === over.id);
-      if (newIndex === -1) {
+      let newIndex;
+      if (overType === 'item') {
+        newIndex = sourceItems.findIndex((item) => item.id === over.id);
+        if (newIndex === -1) {
+          resetDragState();
+          return;
+        }
+      } else {
+        newIndex = sourceItems.length - 1;
+      }
+
+      if (newIndex === oldIndex) {
         resetDragState();
         return;
       }
