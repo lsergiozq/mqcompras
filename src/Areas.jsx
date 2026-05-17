@@ -66,7 +66,7 @@ function SortableAreaItem({ area, onEdit, onDelete }) {
         <button type="button" onClick={() => onEdit(area)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '8px' }}>
           <Edit2 color="var(--primary)" size={20} />
         </button>
-        <button type="button" onClick={() => onDelete(area.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '8px' }}>
+        <button type="button" onClick={() => onDelete(area)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '8px' }}>
           <Trash2 color="var(--danger)" size={20} />
         </button>
       </div>
@@ -135,9 +135,12 @@ export default function Areas() {
     }
   };
 
-  const handleDeleteArea = async (id) => {
-    await supabase.from('areas').delete().eq('id', id);
-    setAreas(areas.filter(a => a.id !== id));
+  const handleDeleteArea = async (area) => {
+    if (!window.confirm(`Tem certeza que deseja apagar o corredor "${area.name}"? Os produtos deste corredor ficarão sem corredor associado.`)) {
+      return;
+    }
+    await supabase.from('areas').delete().eq('id', area.id);
+    setAreas(areas.filter(a => a.id !== area.id));
   };
 
   const handleEditArea = async (area) => {

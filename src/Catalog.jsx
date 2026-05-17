@@ -201,6 +201,13 @@ export default function Catalog() {
   const [activeDragProduct, setActiveDragProduct] = useState(null);
   const [overAreaKey, setOverAreaKey] = useState(null);
   const groupSectionRefs = useRef(new Map());
+  // Fila de escritas no Supabase para evitar race condition em ordenações rápidas.
+  // Cada saveProductOrder é encadeado no .then() do anterior, garantindo ordem
+  // tanto local (estado) quanto remota (banco).
+  const writeQueueRef = useRef(Promise.resolve());
+  // Espelho do estado `products` para que cálculos de drag operem sempre sobre
+  // a versão mais recente, sem depender do closure do render anterior.
+  const productsRef = useRef([]);
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 6 },
@@ -246,6 +253,11 @@ export default function Catalog() {
   };
 
   const loadCatalog = useCallback(async () => {
+    // Espera todas as escritas de ordenação pendentes terminarem antes de
+    // hidratar o estado, senão o reload pode sobrescrever a UI com uma versão
+    // antiga (a última escrita ainda nem chegou no banco).
+    await writeQueueRef.current.catch(() => {});
+
     const [{ data }, { data: areaRows }] = await Promise.all([
       supabase
       .from('products')
@@ -262,6 +274,9 @@ export default function Catalog() {
 
     if (!data) return;
 
+    // Sincroniza ref imediatamente para que handlers de drag chamados antes
+    // do próximo render já vejam a versão recém-carregada.
+    productsRef.current = data;
     startTransition(() => {
       setProducts(data);
       setAreas(areaRows || []);
@@ -289,6 +304,14 @@ export default function Catalog() {
   useEffect(() => {
     if (user && currentPlaceId) loadCatalog();
   }, [user, currentPlaceId, loadCatalog]);
+
+  // Mantém productsRef sincronizado com o estado atual para que handlers
+  // assíncronos (drag em sequência rápida) sempre leiam a versão mais recente.
+  // O ref também é atualizado de forma síncrona em handleDragEnd e loadCatalog
+  // para cobrir o caso em que dois drags acontecem no mesmo "tick" do React.
+  useEffect(() => {
+    productsRef.current = products;
+  }, [products]);
 
   useEffect(() => {
     const updateHeaderElevation = () => {
@@ -477,17 +500,12 @@ export default function Catalog() {
     }
   };
 
-  const saveProductOrder = async (orderedAreaItems, areaId) => {
-    const reorderedWithIndex = orderedAreaItems.map((item, index) => ({
-      ...item,
-      order_index: index * 10,
-      area_id: areaId,
-    }));
-
-    const reorderedById = new Map(reorderedWithIndex.map((item) => [item.id, item]));
-    setProducts((currentProducts) => currentProducts.map((product) => reorderedById.get(product.id) || product));
-
-    const updates = reorderedWithIndex.map((item) => ({
+  // Persiste a nova ordem de uma área. Recebe os itens já com order_index e
+  // area_id corretos (calculados em handleDragEnd). A escrita remota é
+  // serializada via writeQueueRef para garantir que duas ordenações rápidas
+  // em sequência não cheguem fora de ordem no Supabase.
+  const enqueueProductOrderWrite = (orderedAreaItems, areaId) => {
+    const updates = orderedAreaItems.map((item) => ({
       id: item.id,
       place_id: item.place_id,
       area_id: areaId,
@@ -496,7 +514,12 @@ export default function Catalog() {
       order_index: item.order_index,
     }));
 
-    await supabase.from('products').upsert(updates);
+    const nextWrite = writeQueueRef.current
+      .catch(() => {})
+      .then(() => supabase.from('products').upsert(updates));
+
+    writeQueueRef.current = nextWrite;
+    return nextWrite;
   };
 
   const showToast = (message) => {
@@ -520,7 +543,7 @@ export default function Catalog() {
     setOverAreaKey(null);
   };
 
-  const handleDragEnd = async (event) => {
+  const handleDragEnd = (event) => {
     if (searchQuery) return;
 
     const { active, over } = event;
@@ -535,13 +558,21 @@ export default function Catalog() {
     const overAreaId = over.data.current?.areaId ?? null;
     const overAreaKey = over.data.current?.areaKey ?? getAreaKey(overAreaId);
     const overAreaName = over.data.current?.areaName || 'Sem Corredor';
+    const overType = over.data.current?.type;
 
     if (active.id === over.id && activeAreaKey === overAreaKey) {
       resetDragState();
       return;
     }
 
-    const sourceItems = products.filter((product) => getAreaKey(product.area_id ?? null) === activeAreaKey);
+    // Sempre parte da versão MAIS RECENTE do estado, não do closure do render.
+    // Isso é o que evita que dois drags rápidos em sequência partam do mesmo
+    // snapshot e um deles "desfaça" o outro.
+    const currentProducts = productsRef.current;
+
+    const sourceItems = currentProducts.filter(
+      (product) => getAreaKey(product.area_id ?? null) === activeAreaKey,
+    );
     const oldIndex = sourceItems.findIndex((item) => item.id === active.id);
     if (oldIndex === -1) {
       resetDragState();
@@ -555,24 +586,59 @@ export default function Catalog() {
         return;
       }
 
-      const reordered = arrayMove(sourceItems, oldIndex, newIndex);
-      await saveProductOrder(reordered, activeAreaId);
+      const reordered = arrayMove(sourceItems, oldIndex, newIndex).map((item, index) => ({
+        ...item,
+        order_index: index * 10,
+        area_id: activeAreaId,
+      }));
+
+      const reorderedById = new Map(reordered.map((item) => [item.id, item]));
+      const nextProducts = currentProducts.map((product) => reorderedById.get(product.id) || product);
+      productsRef.current = nextProducts;
+      setProducts(nextProducts);
+
+      enqueueProductOrderWrite(reordered, activeAreaId);
       resetDragState();
       return;
     }
 
-    const destinationItems = products.filter((product) => getAreaKey(product.area_id ?? null) === overAreaKey);
+    // Mudança entre corredores
+    const destinationItems = currentProducts.filter(
+      (product) => getAreaKey(product.area_id ?? null) === overAreaKey,
+    );
     const movedItem = { ...sourceItems[oldIndex], area_id: overAreaId };
     const nextSourceItems = sourceItems.filter((item) => item.id !== active.id);
-    const nextDestinationItems = [...destinationItems];
-    const insertionIndex = over.data.current?.type === 'item'
+    const nextDestinationItemsRaw = [...destinationItems];
+    const insertionIndex = overType === 'item'
       ? destinationItems.findIndex((item) => item.id === over.id)
       : destinationItems.length;
 
-    nextDestinationItems.splice(insertionIndex < 0 ? destinationItems.length : insertionIndex, 0, movedItem);
+    nextDestinationItemsRaw.splice(
+      insertionIndex < 0 ? destinationItems.length : insertionIndex,
+      0,
+      movedItem,
+    );
 
-    await saveProductOrder(nextSourceItems, activeAreaId);
-    await saveProductOrder(nextDestinationItems, overAreaId);
+    const nextSource = nextSourceItems.map((item, index) => ({
+      ...item,
+      order_index: index * 10,
+      area_id: activeAreaId,
+    }));
+    const nextDestination = nextDestinationItemsRaw.map((item, index) => ({
+      ...item,
+      order_index: index * 10,
+      area_id: overAreaId,
+    }));
+
+    const updatedById = new Map(
+      [...nextSource, ...nextDestination].map((item) => [item.id, item]),
+    );
+    const nextProducts = currentProducts.map((product) => updatedById.get(product.id) || product);
+    productsRef.current = nextProducts;
+    setProducts(nextProducts);
+
+    enqueueProductOrderWrite(nextSource, activeAreaId);
+    enqueueProductOrderWrite(nextDestination, overAreaId);
     showToast(`✓ Movido de ${activeAreaName} para ${overAreaName}`);
     resetDragState();
   };
